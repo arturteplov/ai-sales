@@ -339,7 +339,8 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
     }))
   ];
 
-  const responseSchema = {
+  const responseFormat = {
+    type: 'json_schema',
     name: 'ai_sales_review',
     json_schema: {
       type: 'object',
@@ -407,7 +408,7 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
       }
     ],
     text: {
-      format: responseSchema
+      format: responseFormat
     }
   };
 
@@ -472,7 +473,8 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
     }))
   ];
 
-  const responseSchema = {
+  const responseFormat = {
+    type: 'json_schema',
     name: 'ai_sales_build_plan',
     json_schema: {
       type: 'object',
@@ -580,7 +582,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
       }
     ],
     text: {
-      format: responseSchema
+      format: responseFormat
     }
   };
 
