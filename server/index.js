@@ -434,6 +434,10 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
     const result = await response.json();
     const structured = extractStructuredPayload(result);
     if (!structured) {
+      console.warn(
+        'Advisor response missing structured payload.',
+        JSON.stringify(result).slice(0, 2000)
+      );
       throw new Error('Model did not return structured payload.');
     }
 
@@ -614,6 +618,10 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
   const result = await response.json();
   const structured = extractStructuredPayload(result);
   if (!structured) {
+    console.warn(
+      'Builder response missing structured payload.',
+      JSON.stringify(result).slice(0, 2000)
+    );
     throw new Error('Model did not return build plan.');
   }
 
@@ -977,9 +985,30 @@ function extractStructuredPayload(result) {
       if (piece.type === 'output_json_schema' && piece.json) {
         return piece.json;
       }
+      if (piece.type === 'output_json_schema' && piece.schema) {
+        return piece.schema;
+      }
+      if (piece.type === 'json_schema' && piece.schema) {
+        return piece.schema;
+      }
+      if (piece.type === 'json_schema' && piece.json) {
+        return piece.json;
+      }
+      if (piece.output_json_schema && piece.output_json_schema.json) {
+        return piece.output_json_schema.json;
+      }
+      if (piece.output_json_schema && piece.output_json_schema.schema) {
+        return piece.output_json_schema.schema;
+      }
       if (piece.type === 'text' && piece.text) {
         const parsed = safeJsonParse(piece.text);
         if (parsed) return parsed;
+      }
+      if (piece.json && typeof piece.json === 'object') {
+        return piece.json;
+      }
+      if (piece.schema && typeof piece.schema === 'object') {
+        return piece.schema;
       }
     }
   }
