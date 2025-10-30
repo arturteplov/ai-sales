@@ -307,6 +307,10 @@ async function fileToBase64(filePath) {
 async function callAdvisorModel({ prompt, tone, builder, attachments }) {
   const apiKey = process.env.OPENAI_API_KEY;
 
+  if (isSmallTalkPrompt(prompt, attachments)) {
+    return buildSmallTalkAdvisorResponse({ prompt, tone, builder });
+  }
+
   if (!apiKey) {
     return simulateAdvisorResponse({ prompt, tone, builder, attachments });
   }
@@ -565,8 +569,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
                 required: ['filename', 'description'],
                 properties: {
                   filename: { type: 'string' },
-                  description: { type: 'string' },
-                  snippet: { type: 'string' }
+                  description: { type: 'string' }
                 }
               }
             }
@@ -837,6 +840,97 @@ function normalizeLLMResponse(payload, { tone, builder }) {
     })),
     reassurance: parsed?.reassurance || frictionRationale,
     suggestedPrompts: parsed?.suggested_prompts || []
+  };
+}
+
+function isSmallTalkPrompt(prompt = '', attachments = []) {
+  if (!prompt || attachments.length > 0) return false;
+  const text = prompt.trim().toLowerCase();
+  if (!text) return false;
+
+  if (text.length > 160) return false;
+
+  const engagementKeywords = [
+    'landing',
+    'pricing',
+    'signup',
+    'checkout',
+    'conversion',
+    'hero',
+    'button',
+    'flow',
+    'screen',
+    'ui',
+    'ux',
+    'user'
+  ];
+  if (engagementKeywords.some((kw) => text.includes(kw))) {
+    return false;
+  }
+
+  const smallTalkTriggers = [
+    'how is it going',
+    'how are you',
+    'what is up',
+    "what's up",
+    'hello',
+    'hi there',
+    'hey there',
+    'good morning',
+    'good evening',
+    'thanks',
+    'thank you',
+    'great job',
+    'awesome',
+    'cool'
+  ];
+
+  return smallTalkTriggers.some((phrase) => text.includes(phrase));
+}
+
+function buildSmallTalkAdvisorResponse({ prompt = '', tone, builder }) {
+  const toneGuidance = getToneGuidance(tone);
+  const builderGuidance = getBuilderGuidance(builder);
+  const promptSnippet = prompt.trim() ? `You said “${prompt.trim()}.” ` : '';
+
+  const headlineBase = 'Quick pulse check before we dive in.';
+  const summaryBase = `${promptSnippet}I’m here to audit your product experience. Share a flow, screenshots, or your current challenge and I’ll pinpoint what builds trust and what creates friction.`;
+
+  const insightDetail =
+    'Tell me about a screen, funnel, or mindset you want prospects to have. The richer the context, the sharper the recommendations.';
+
+  return {
+    headline: toneGuidance.rewrite(headlineBase),
+    summary: toneGuidance.rewrite(summaryBase),
+    friction_score: {
+      numeric: 3,
+      label: 'Moderate',
+      rationale: toneGuidance.rewrite(
+        'I have not evaluated a specific experience yet—once you share it, I will score the friction and explain why.'
+      )
+    },
+    findings: [
+      {
+        title: toneGuidance.rewrite('Point me at a specific moment.'),
+        detail: toneGuidance.rewrite(insightDetail)
+      }
+    ],
+    builder_actions: [
+      {
+        title: toneGuidance.rewrite(`Prep for ${builderGuidance.label}`),
+        detail: toneGuidance.rewrite(
+          `Jot down what feels clunky today, then share the screen or flow. I’ll translate improvements into ${builderGuidance.label} steps like: ${builderGuidance.tip}`
+        )
+      }
+    ],
+    reassurance: toneGuidance.rewrite(
+      'Once you share the experience, I’ll respond immediately with a tailored teardown.'
+    ),
+    suggested_prompts: [
+      'Audit my onboarding screen flow.',
+      'Review the hero section copy.',
+      `Show me how to improve the pricing experience in ${builderGuidance.label === builder ? builder : 'my builder'}.`
+    ]
   };
 }
 
