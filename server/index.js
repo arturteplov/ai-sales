@@ -76,7 +76,7 @@ app.get('/api/session', (req, res) => {
 });
 
 app.post('/api/analyze', upload.array('files'), async (req, res) => {
-  const { prompt = '', tone = 'low-tech', builder = 'Bubble' } = req.body || {};
+  const { prompt = '', tone = 'low-tech', builder = 'Bubble', context = '' } = req.body || {};
   const files = req.files || [];
 
   if (!prompt.trim() && files.length === 0) {
@@ -97,7 +97,8 @@ app.post('/api/analyze', upload.array('files'), async (req, res) => {
       prompt,
       tone,
       builder,
-      attachments
+      attachments,
+      context
     });
 
     cleanupFiles(files);
@@ -114,7 +115,7 @@ app.post('/api/analyze', upload.array('files'), async (req, res) => {
 
 app.post('/api/build', upload.array('files'), async (req, res) => {
   const session = req.session || { buildsUsed: 0, isSubscribed: false };
-  const { prompt = '', tone = 'low-tech', builder = 'No builder' } = req.body || {};
+  const { prompt = '', tone = 'low-tech', builder = 'No builder', context = '' } = req.body || {};
   const files = req.files || [];
 
   if (!prompt.trim()) {
@@ -145,7 +146,8 @@ app.post('/api/build', upload.array('files'), async (req, res) => {
       prompt,
       tone,
       builder,
-      attachments
+      attachments,
+      context
     });
 
     cleanupFiles(files);
@@ -304,7 +306,7 @@ async function fileToBase64(filePath) {
   return data.toString('base64');
 }
 
-async function callAdvisorModel({ prompt, tone, builder, attachments }) {
+async function callAdvisorModel({ prompt, tone, builder, attachments, context = '' }) {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (isSmallTalkPrompt(prompt, attachments)) {
@@ -327,15 +329,21 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
     'Respond using the JSON schema provided so that the application can reliably render your feedback.'
   ].join(' ');
 
+  const contextSection = context
+    ? [`Conversation context so far:\n${context.slice(0, 2000)}`]
+    : [];
+
+  const primaryPromptSection = [
+    `User tone preference: ${tone} (${toneGuidance.label}).`,
+    `Preferred builder: ${builder}.`,
+    'User brief:',
+    prompt
+  ].join('\n');
+
   const userContent = [
     {
       type: 'input_text',
-      text: [
-        `User tone preference: ${tone} (${toneGuidance.label}).`,
-        `Preferred builder: ${builder}.`,
-        'User brief:',
-        prompt
-      ].join('\n')
+      text: [...contextSection, primaryPromptSection].filter(Boolean).join('\n\n')
     },
     ...attachments.map((file) => ({
       type: 'input_image',
@@ -452,7 +460,7 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
   }
 }
 
-async function callBuilderModel({ prompt, tone, builder, attachments }) {
+async function callBuilderModel({ prompt, tone, builder, attachments, context = '' }) {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -469,15 +477,21 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
     'Respond using the JSON schema so the application can render the plan reliably.'
   ].join(' ');
 
+  const contextSection = context
+    ? [`Conversation context so far:\n${context.slice(0, 2000)}`]
+    : [];
+
+  const buildPromptSection = [
+    `Preferred builder: ${builderGuidance.label}.`,
+    `Tone: ${toneGuidance.label}.`,
+    'Brief:',
+    prompt
+  ].join('\n');
+
   const userContent = [
     {
       type: 'input_text',
-      text: [
-        `Preferred builder: ${builderGuidance.label}.`,
-        `Tone: ${toneGuidance.label}.`,
-        'Brief:',
-        prompt
-      ].join('\n')
+      text: [...contextSection, buildPromptSection].filter(Boolean).join('\n\n')
     },
     ...attachments.map((file) => ({
       type: 'input_image',
