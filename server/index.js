@@ -406,10 +406,11 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
         content: userContent
       }
     ],
-    modalities: ['text'],
     text: {
-      format: 'json_schema',
-      schema: responseSchema
+      format: {
+        type: 'json_schema',
+        json_schema: responseSchema
+      }
     }
   };
 
@@ -581,10 +582,11 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
         content: userContent
       }
     ],
-    modalities: ['text'],
     text: {
-      format: 'json_schema',
-      schema: responseSchema
+      format: {
+        type: 'json_schema',
+        json_schema: responseSchema
+      }
     }
   };
 
