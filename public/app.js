@@ -141,12 +141,7 @@ function renderApp() {
     textarea.addEventListener('focus', () => {
       dom.chatTextarea = textarea;
     });
-    textarea.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
-        submitPromptFromTextarea(textarea);
-      }
-    });
+    textarea.addEventListener('keydown', handleTextareaKeydown);
   });
 
   setupDragAndDrop();
@@ -278,7 +273,14 @@ function submitPrompt(event) {
   submitPromptFromTextarea(textarea);
 }
 
-function submitPromptFromTextarea(textarea) {outl
+function handleTextareaKeydown(event) {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    submitPromptFromTextarea(event.target);
+  }
+}
+
+function submitPromptFromTextarea(textarea) {
   const text = textarea.value.trim();
   if (!text) return;
 
