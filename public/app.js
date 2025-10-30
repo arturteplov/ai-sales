@@ -335,7 +335,9 @@ function renderMessages() {
     if (Array.isArray(message.text)) {
       message.text.filter(Boolean).forEach((paragraph) => paragraphs.push(paragraph));
     } else if (typeof message.text === 'string' && message.text.trim()) {
-      paragraphs.push(message.text);
+      if (!message.summary || message.text.trim() !== message.summary.trim()) {
+        paragraphs.push(message.text);
+      }
     }
 
     paragraphs.forEach((paragraph) => {
@@ -522,7 +524,7 @@ async function sendAdvisorRequest(promptText) {
         : 'Updated';
     }
 
-    addMessage('ai', formatted.summary, {
+    addMessage('ai', '', {
       headline: formatted.headline,
       summary: formatted.summary,
       insights: formatted.insights,
@@ -573,7 +575,33 @@ async function requestBuild(event) {
       throw new Error(errorBody.message || 'Builder request failed.');
     }
 
-    const data = await response.json();
+    const rawBody = await response.text();
+    let parsedBody = null;
+    if (rawBody) {
+      try {
+        parsedBody = JSON.parse(rawBody);
+      } catch (_error) {
+        parsedBody = null;
+      }
+    }
+
+    if (response.status === 402) {
+      const message = parsedBody?.message || 'Upgrade to continue.';
+      showToast(message);
+      addMessage('ai', message);
+      return;
+    }
+
+    if (!response.ok) {
+      const message = parsedBody?.message || parsedBody?.error || parseNonJsonError(rawBody);
+      throw new Error(message || 'Builder request failed.');
+    }
+
+    if (!parsedBody) {
+      throw new Error(parseNonJsonError(rawBody));
+    }
+
+    const data = parsedBody;
     const formatted = formatBuildResponse(data);
 
     if (typeof data.remainingFreeBuilds === 'number') {
@@ -586,7 +614,7 @@ async function requestBuild(event) {
       showToast('Build plan ready.');
     }
 
-    addMessage('ai', formatted.summary, {
+    addMessage('ai', '', {
       headline: formatted.headline,
       summary: formatted.summary,
       insights: formatted.insights,
@@ -795,4 +823,12 @@ function syncBuilderDisplay() {
   dom.builderSelects.forEach((select) => {
     if (select) select.value = state.builder;
   });
+}
+
+function parseNonJsonError(rawText) {
+  if (!rawText) return 'Unexpected server response.';
+  const text = rawText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!text) return 'Unexpected server response.';
+  if (text.length > 240) return `${text.slice(0, 237)}…`;
+  return text;
 }
