@@ -344,12 +344,14 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
     name: 'ai_sales_review',
     schema: {
       type: 'object',
+      additionalProperties: false,
       required: ['headline', 'summary', 'friction_score', 'findings', 'builder_actions', 'reassurance'],
       properties: {
         headline: { type: 'string', description: 'Short sentence summarising the main issue or opportunity.' },
         summary: { type: 'string', description: 'Concise paragraph overviewing the current state and what matters most.' },
         friction_score: {
           type: 'object',
+          additionalProperties: false,
           required: ['numeric', 'label', 'rationale'],
           properties: {
             numeric: { type: 'integer', minimum: 1, maximum: 5, description: '1 = very low friction, 5 = very high friction.' },
@@ -362,6 +364,7 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
           minItems: 1,
           items: {
             type: 'object',
+            additionalProperties: false,
             required: ['title', 'detail'],
             properties: {
               title: { type: 'string' },
@@ -374,6 +377,7 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
           minItems: 1,
           items: {
             type: 'object',
+            additionalProperties: false,
             required: ['title', 'detail'],
             properties: {
               title: { type: 'string' },
@@ -478,6 +482,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
     name: 'ai_sales_build_plan',
     schema: {
       type: 'object',
+      additionalProperties: false,
       required: ['headline', 'summary', 'screens', 'builder_steps', 'export_plan', 'next_steps'],
       properties: {
         headline: { type: 'string' },
@@ -487,6 +492,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
           minItems: 1,
           items: {
             type: 'object',
+            additionalProperties: false,
             required: ['name', 'goal', 'key_elements'],
             properties: {
               name: { type: 'string' },
@@ -502,6 +508,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
           type: 'array',
           items: {
             type: 'object',
+            additionalProperties: false,
             required: ['title', 'steps'],
             properties: {
               title: { type: 'string' },
@@ -516,6 +523,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
           type: 'array',
           items: {
             type: 'object',
+            additionalProperties: false,
             required: ['entity', 'fields'],
             properties: {
               entity: { type: 'string' },
@@ -531,6 +539,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
           minItems: 1,
           items: {
             type: 'object',
+            additionalProperties: false,
             required: ['title', 'detail'],
             properties: {
               title: { type: 'string' },
@@ -540,6 +549,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
         },
         export_plan: {
           type: 'object',
+          additionalProperties: false,
           required: ['description', 'files'],
           properties: {
             description: { type: 'string' },
@@ -547,6 +557,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
               type: 'array',
               items: {
                 type: 'object',
+                additionalProperties: false,
                 required: ['filename', 'description'],
                 properties: {
                   filename: { type: 'string' },
