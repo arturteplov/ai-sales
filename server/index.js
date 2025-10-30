@@ -325,7 +325,7 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
 
   const userContent = [
     {
-      type: 'text',
+      type: 'input_text',
       text: [
         `User tone preference: ${tone} (${toneGuidance.label}).`,
         `Preferred builder: ${builder}.`,
@@ -396,9 +396,9 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
       {
         role: 'system',
         content: [
-          { type: 'text', text: systemPrompt },
-          { type: 'text', text: toneGuidance.system },
-          { type: 'text', text: builderGuidance.system }
+          { type: 'input_text', text: systemPrompt },
+          { type: 'input_text', text: toneGuidance.system },
+          { type: 'input_text', text: builderGuidance.system }
         ]
       },
       {
@@ -461,7 +461,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
 
   const userContent = [
     {
-      type: 'text',
+      type: 'input_text',
       text: [
         `Preferred builder: ${builderGuidance.label}.`,
         `Tone: ${toneGuidance.label}.`,
@@ -575,7 +575,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
     input: [
       {
         role: 'system',
-        content: [{ type: 'text', text: systemPrompt }]
+        content: [{ type: 'input_text', text: systemPrompt }]
       },
       {
         role: 'user',
