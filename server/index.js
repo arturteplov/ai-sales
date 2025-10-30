@@ -1010,6 +1010,14 @@ function extractStructuredPayload(result) {
       if (piece.schema && typeof piece.schema === 'object') {
         return piece.schema;
       }
+      if (piece.type === 'output_text' && typeof piece.text === 'string') {
+        const parsed = safeJsonParse(piece.text);
+        if (parsed) return parsed;
+      }
+      if (piece.text && typeof piece.text === 'string') {
+        const parsed = safeJsonParse(piece.text);
+        if (parsed) return parsed;
+      }
     }
   }
 
