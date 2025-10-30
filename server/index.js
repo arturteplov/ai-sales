@@ -345,7 +345,7 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
     schema: {
       type: 'object',
       additionalProperties: false,
-      required: ['headline', 'summary', 'friction_score', 'findings', 'builder_actions', 'reassurance'],
+      required: ['headline', 'summary', 'friction_score', 'findings', 'builder_actions', 'reassurance', 'suggested_prompts'],
       properties: {
         headline: { type: 'string', description: 'Short sentence summarising the main issue or opportunity.' },
         summary: { type: 'string', description: 'Concise paragraph overviewing the current state and what matters most.' },
