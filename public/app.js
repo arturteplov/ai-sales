@@ -25,7 +25,12 @@ const state = {
   ],
   isConversing: false,
   lastPrompt: '',
-  lastAttachments: []
+  lastAttachments: [],
+  intakeSeed: '',
+  intakeAnswers: [],
+  intakeQuestionIndex: 0,
+  awaitingIntake: false,
+  expectingIntakeAnswer: false
 };
 
 const toneLabels = {
@@ -290,7 +295,9 @@ function submitPromptFromTextarea(textarea) {
   }
 
   state.lastPrompt = text;
-  state.lastAttachments = [...state.files];
+  if (state.files.length > 0) {
+    state.lastAttachments = [...state.files];
+  }
   addMessage('user', text);
   textarea.value = '';
   dom.chatTextarea = textarea;
@@ -302,7 +309,7 @@ function submitPromptFromTextarea(textarea) {
     renderFilePreview();
   }
 
-  sendAdvisorRequest(text);
+  handleUserInput(text);
 }
 
 function setTone(tone) {
@@ -646,6 +653,10 @@ async function buildFormData(promptText) {
   payload.append('prompt', promptText);
   payload.append('tone', state.tone);
   payload.append('builder', state.builder);
+  const context = buildConversationContext(promptText);
+  if (context) {
+    payload.append('context', context);
+  }
   const filesToSend = state.files.length ? state.files : state.lastAttachments || [];
   filesToSend.forEach((file) => payload.append('files', file, file.name));
   return payload;
@@ -831,4 +842,207 @@ function parseNonJsonError(rawText) {
   if (!text) return 'Unexpected server response.';
   if (text.length > 240) return `${text.slice(0, 237)}…`;
   return text;
+}
+
+function buildConversationContext(currentPrompt = '') {
+  const history = state.conversation.filter((entry) => !entry.pending);
+  if (history.length === 0) return '';
+
+  const normalizedPrompt = normalizeText(currentPrompt);
+  const sliceStart = Math.max(0, history.length - MAX_HISTORY_TURNS);
+  const selected = history.slice(sliceStart).filter((entry, index, arr) => {
+    if (entry.sender !== 'user') return true;
+    if (!normalizedPrompt) return true;
+    if (index === arr.length - 1) {
+      const entryText = normalizeText(flattenMessage(entry));
+      return entryText && entryText !== normalizedPrompt;
+    }
+    return true;
+  });
+
+  const lines = [];
+  selected.forEach((entry) => {
+    const label = entry.sender === 'ai' ? 'AI Sales' : 'User';
+    const text = flattenMessage(entry);
+    if (text) {
+      lines.push(`${label}: ${text}`);
+    }
+  });
+
+  return lines.join('\n').slice(0, INTAKE_CONTEX_LENGTH);
+}
+
+function flattenMessage(message) {
+  const parts = [];
+  if (message.headline) parts.push(message.headline);
+  if (message.summary) parts.push(message.summary);
+
+  if (Array.isArray(message.text)) {
+    message.text.filter(Boolean).forEach((item) => parts.push(item));
+  } else if (typeof message.text === 'string') {
+    parts.push(message.text);
+  }
+
+  const insights = message.insights || [];
+  insights.slice(0, 3).forEach((item, idx) => {
+    if (!item) return;
+    const title = typeof item === 'object' ? item.title : null;
+    const detail =
+      typeof item === 'object' ? item.detail : typeof item === 'string' ? item : JSON.stringify(item);
+    parts.push(title ? `${title}: ${detail}` : detail);
+  });
+
+  const builderActions = message.builderActions || [];
+  builderActions.slice(0, 3).forEach((item) => {
+    if (!item) return;
+    const title = typeof item === 'object' ? item.title : null;
+    const detail =
+      typeof item === 'object' ? item.detail : typeof item === 'string' ? item : JSON.stringify(item);
+    parts.push(title ? `${title}: ${detail}` : detail);
+  });
+
+  const reassurance = message.reassurance;
+  if (reassurance) parts.push(reassurance);
+
+  return parts
+    .map((segment) => segment || '')
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeText(value = '') {
+  return (value || '').toString().trim().toLowerCase();
+}
+
+const INTAKE_CONTEX_LENGTH = 2000;
+const MAX_HISTORY_TURNS = 6;
+
+function handleUserInput(text) {
+  if (state.awaitingIntake) {
+    if (state.expectingIntakeAnswer) {
+      recordIntakeAnswer(text);
+      return;
+    }
+  }
+
+  if (!state.awaitingIntake && requiresFreshIntake(text)) {
+    startIntake(text);
+    return;
+  }
+
+  if (!state.awaitingIntake && state.intakeQuestionIndex === 0 && state.conversation.length <= 2) {
+    startIntake(text);
+    return;
+  }
+
+  // Default: send prompt directly to advisor with context
+  state.lastPrompt = text;
+  sendAdvisorRequest(text);
+}
+
+function startIntake(seedPrompt) {
+  state.intakeSeed = seedPrompt;
+  state.intakeAnswers = [];
+  state.intakeQuestionIndex = 0;
+  state.awaitingIntake = true;
+  state.expectingIntakeAnswer = false;
+  askNextIntakeQuestion();
+}
+
+function recordIntakeAnswer(answer) {
+  state.intakeAnswers.push(answer);
+  state.expectingIntakeAnswer = false;
+  state.intakeQuestionIndex += 1;
+
+  if (state.intakeQuestionIndex >= getIntakeQuestions().length) {
+    finalizeIntake();
+  } else {
+    askNextIntakeQuestion();
+  }
+}
+
+function askNextIntakeQuestion() {
+  const questions = getIntakeQuestions();
+  const nextQuestion = questions[state.intakeQuestionIndex];
+  if (!nextQuestion) {
+    finalizeIntake();
+    return;
+  }
+
+  const toneIntro =
+    state.intakeQuestionIndex === 0
+      ? 'Before I craft the plan, let me understand a few things.'
+      : undefined;
+
+  const text = toneIntro ? `${toneIntro}\n\n${nextQuestion}` : nextQuestion;
+
+  addMessage('ai', text, {
+    headline: state.intakeQuestionIndex === 0 ? 'Let me get the right context.' : undefined,
+    summary: nextQuestion
+  });
+
+  state.expectingIntakeAnswer = true;
+}
+
+function finalizeIntake() {
+  const intakeSummary = composeIntakePrompt();
+  state.awaitingIntake = false;
+  state.expectingIntakeAnswer = false;
+  state.intakeSeed = '';
+  state.intakeAnswers = [];
+  state.intakeQuestionIndex = 0;
+  state.lastPrompt = intakeSummary;
+  sendAdvisorRequest(intakeSummary);
+}
+
+function composeIntakePrompt() {
+  const questions = getIntakeQuestions();
+  const segments = [];
+
+  if (state.intakeSeed) {
+    segments.push(`Initial request from user: ${state.intakeSeed}`);
+  }
+
+  state.intakeAnswers.forEach((answer, index) => {
+    const question = questions[index] || `Context question ${index + 1}`;
+    segments.push(`${question}\nUser answer: ${answer}`);
+  });
+
+  segments.push(`Preferred builder: ${state.builder}. Tailor recommendations and implementation steps specifically for this builder where applicable.`);
+  segments.push(
+    'Using the context above, deliver a cohesive evaluation that: ' +
+      '1) identifies the biggest trust-blockers and missed persuasion opportunities, ' +
+      '2) suggests precise UX, copy, and hierarchy adjustments, ' +
+      '3) outlines builder-specific implementation steps, and ' +
+      '4) proposes next experiments or metrics to watch.'
+  );
+
+  return segments.join('\n\n');
+}
+
+function getIntakeQuestions() {
+  const builder = state.builder || 'No builder';
+  const builderPrompt =
+    builder === 'No builder'
+      ? 'Which tooling or format are you using right now (code, design tool, slides, etc.)?'
+      : `Within ${builder}, which components or flows do you want me to adjust or rebuild?`;
+
+  return [
+    'Who is the primary audience and what outcome do you need them to achieve when they land here?',
+    'What part of the current experience feels weakest or causes drop-off right now?',
+    builderPrompt
+  ];
+}
+
+function requiresFreshIntake(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) return true;
+  if (normalized.length < 4) return true;
+  if (/(restart|start over|new review|reset)/i.test(text)) return true;
+  const followUpCue = /(another|else|next improvements|new app)/i.test(text);
+  if (followUpCue && state.conversation.length > 1) {
+    return true;
+  }
+  return false;
 }
