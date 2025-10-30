@@ -341,7 +341,7 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
 
   const responseSchema = {
     name: 'ai_sales_review',
-    schema: {
+    json_schema: {
       type: 'object',
       required: ['headline', 'summary', 'friction_score', 'findings', 'builder_actions', 'reassurance'],
       properties: {
@@ -407,10 +407,7 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
       }
     ],
     text: {
-      format: {
-        type: 'json_schema',
-        json_schema: responseSchema
-      }
+      format: responseSchema
     }
   };
 
@@ -477,7 +474,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
 
   const responseSchema = {
     name: 'ai_sales_build_plan',
-    schema: {
+    json_schema: {
       type: 'object',
       required: ['headline', 'summary', 'screens', 'builder_steps', 'export_plan', 'next_steps'],
       properties: {
@@ -583,10 +580,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
       }
     ],
     text: {
-      format: {
-        type: 'json_schema',
-        json_schema: responseSchema
-      }
+      format: responseSchema
     }
   };
 
