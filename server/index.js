@@ -339,55 +339,52 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
     }))
   ];
 
-  const responseFormat = {
-    type: 'json_schema',
-    json_schema: {
-      name: 'ai_sales_review',
-      schema: {
-        type: 'object',
-        required: ['headline', 'summary', 'friction_score', 'findings', 'builder_actions', 'reassurance'],
-        properties: {
-          headline: { type: 'string', description: 'Short sentence summarising the main issue or opportunity.' },
-          summary: { type: 'string', description: 'Concise paragraph overviewing the current state and what matters most.' },
-          friction_score: {
-            type: 'object',
-            required: ['numeric', 'label', 'rationale'],
-            properties: {
-              numeric: { type: 'integer', minimum: 1, maximum: 5, description: '1 = very low friction, 5 = very high friction.' },
-              label: { type: 'string', description: 'Label describing the numeric score (e.g., Very Low, Low, Moderate, Elevated, High).' },
-              rationale: { type: 'string', description: 'Why the score was chosen.' }
-            }
-          },
-          findings: {
-            type: 'array',
-            minItems: 1,
-            items: {
-              type: 'object',
-              required: ['title', 'detail'],
-              properties: {
-                title: { type: 'string' },
-                detail: { type: 'string' }
-              }
-            }
-          },
-          builder_actions: {
-            type: 'array',
-            minItems: 1,
-            items: {
-              type: 'object',
-              required: ['title', 'detail'],
-              properties: {
-                title: { type: 'string' },
-                detail: { type: 'string' }
-              }
-            }
-          },
-          reassurance: { type: 'string', description: 'Closing reassurance or guidance for next steps.' },
-          suggested_prompts: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Optional suggestions for what the user could ask next.'
+  const responseSchema = {
+    name: 'ai_sales_review',
+    schema: {
+      type: 'object',
+      required: ['headline', 'summary', 'friction_score', 'findings', 'builder_actions', 'reassurance'],
+      properties: {
+        headline: { type: 'string', description: 'Short sentence summarising the main issue or opportunity.' },
+        summary: { type: 'string', description: 'Concise paragraph overviewing the current state and what matters most.' },
+        friction_score: {
+          type: 'object',
+          required: ['numeric', 'label', 'rationale'],
+          properties: {
+            numeric: { type: 'integer', minimum: 1, maximum: 5, description: '1 = very low friction, 5 = very high friction.' },
+            label: { type: 'string', description: 'Label describing the numeric score (e.g., Very Low, Low, Moderate, Elevated, High).' },
+            rationale: { type: 'string', description: 'Why the score was chosen.' }
           }
+        },
+        findings: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            required: ['title', 'detail'],
+            properties: {
+              title: { type: 'string' },
+              detail: { type: 'string' }
+            }
+          }
+        },
+        builder_actions: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            required: ['title', 'detail'],
+            properties: {
+              title: { type: 'string' },
+              detail: { type: 'string' }
+            }
+          }
+        },
+        reassurance: { type: 'string', description: 'Closing reassurance or guidance for next steps.' },
+        suggested_prompts: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional suggestions for what the user could ask next.'
         }
       }
     }
@@ -409,8 +406,10 @@ async function callAdvisorModel({ prompt, tone, builder, attachments }) {
         content: userContent
       }
     ],
+    modalities: ['text'],
     text: {
-      format: responseFormat
+      format: 'json_schema',
+      schema: responseSchema
     }
   };
 
@@ -475,99 +474,96 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
     }))
   ];
 
-  const responseFormat = {
-    type: 'json_schema',
-    json_schema: {
-      name: 'ai_sales_build_plan',
-      schema: {
-        type: 'object',
-        required: ['headline', 'summary', 'screens', 'builder_steps', 'export_plan', 'next_steps'],
-        properties: {
-          headline: { type: 'string' },
-          summary: { type: 'string' },
-          screens: {
-            type: 'array',
-            minItems: 1,
-            items: {
-              type: 'object',
-              required: ['name', 'goal', 'key_elements'],
-              properties: {
-                name: { type: 'string' },
-                goal: { type: 'string' },
-                key_elements: {
-                  type: 'array',
-                  items: { type: 'string' }
-                }
-              }
-            }
-          },
-          flows: {
-            type: 'array',
-            items: {
-              type: 'object',
-              required: ['title', 'steps'],
-              properties: {
-                title: { type: 'string' },
-                steps: {
-                  type: 'array',
-                  items: { type: 'string' }
-                }
-              }
-            }
-          },
-          data_model: {
-            type: 'array',
-            items: {
-              type: 'object',
-              required: ['entity', 'fields'],
-              properties: {
-                entity: { type: 'string' },
-                fields: {
-                  type: 'array',
-                  items: { type: 'string' }
-                }
-              }
-            }
-          },
-          builder_steps: {
-            type: 'array',
-            minItems: 1,
-            items: {
-              type: 'object',
-              required: ['title', 'detail'],
-              properties: {
-                title: { type: 'string' },
-                detail: { type: 'string' }
-              }
-            }
-          },
-          export_plan: {
+  const responseSchema = {
+    name: 'ai_sales_build_plan',
+    schema: {
+      type: 'object',
+      required: ['headline', 'summary', 'screens', 'builder_steps', 'export_plan', 'next_steps'],
+      properties: {
+        headline: { type: 'string' },
+        summary: { type: 'string' },
+        screens: {
+          type: 'array',
+          minItems: 1,
+          items: {
             type: 'object',
-            required: ['description', 'files'],
+            required: ['name', 'goal', 'key_elements'],
             properties: {
-              description: { type: 'string' },
-              files: {
+              name: { type: 'string' },
+              goal: { type: 'string' },
+              key_elements: {
                 type: 'array',
-                items: {
-                  type: 'object',
-                  required: ['filename', 'description'],
-                  properties: {
-                    filename: { type: 'string' },
-                    description: { type: 'string' },
-                    snippet: { type: 'string' }
-                  }
+                items: { type: 'string' }
+              }
+            }
+          }
+        },
+        flows: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['title', 'steps'],
+            properties: {
+              title: { type: 'string' },
+              steps: {
+                type: 'array',
+                items: { type: 'string' }
+              }
+            }
+          }
+        },
+        data_model: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['entity', 'fields'],
+            properties: {
+              entity: { type: 'string' },
+              fields: {
+                type: 'array',
+                items: { type: 'string' }
+              }
+            }
+          }
+        },
+        builder_steps: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            required: ['title', 'detail'],
+            properties: {
+              title: { type: 'string' },
+              detail: { type: 'string' }
+            }
+          }
+        },
+        export_plan: {
+          type: 'object',
+          required: ['description', 'files'],
+          properties: {
+            description: { type: 'string' },
+            files: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['filename', 'description'],
+                properties: {
+                  filename: { type: 'string' },
+                  description: { type: 'string' },
+                  snippet: { type: 'string' }
                 }
               }
             }
-          },
-          next_steps: {
-            type: 'array',
-            items: { type: 'string' }
-          },
-          suggested_prompts: {
-            type: 'array',
-            items: { type: 'string' }
           }
+        },
+        next_steps: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        suggested_prompts: {
+          type: 'array',
+          items: { type: 'string' }
         }
       }
     }
@@ -585,8 +581,10 @@ async function callBuilderModel({ prompt, tone, builder, attachments }) {
         content: userContent
       }
     ],
+    modalities: ['text'],
     text: {
-      format: responseFormat
+      format: 'json_schema',
+      schema: responseSchema
     }
   };
 
