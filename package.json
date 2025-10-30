@@ -1,0 +1,20 @@
+{
+  "name": "test_aisales",
+  "version": "0.1.0",
+  "description": "AI Sales Phase 1 advisor web app with backend integrations.",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "node server/index.js",
+    "start": "node server/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "stripe": "^19.2.0"
+  }
+}
