@@ -1,73 +1,82 @@
-# AI Sales – Phase 1 Advisor App
+# AI Trust – Confidence Scorecard App
 
-Full-stack implementation of the Phase 1 “Recommended advisor + follow-up builder” experience. The app serves a zero-login chat workspace, ingests screenshots, communicates with OpenAI (or a local simulator) for advice, and exposes a Stripe checkout entry point for the upcoming builder subscription.
+AI Trust lets teams drop in the latest product screenshots, see instant confidence / pushiness / clarity scores, and—after upgrading—download a curated PDF playbook that matches their results. The earlier chat-centric prototype has been retired; Phase 1 is now a focused scorecard + report experience.
 
-## Features
+## Feature highlights
 
-- **Tone-aware advisor** — three selectable language modes that only change wording, not recommendation depth.
-- **Screenshot upload + secure cleanup** — accepts up to six PNG/JPG/PDF files per session; temporary files removed after analysis.
-- **LLM-backed insights** — server can call GPT‑4o (or any model via `OPENAI_*` env) with both text + image context. Fallback simulator keeps the UI responsive if no API key is present.
-- **Builder-specific prompts** — tailored “copy & apply” instructions for Bubble, Webflow, Glide, Softr, Retool, FlutterFlow, Adalo, Glide Pages.
-- **Monetisation hook** — `/api/payments/checkout` creates Stripe Checkout sessions for a subscription upgrade (disabled until keys are provided).
-- **Transcripts & trust microcopy** — users can download the chat, get friction scoring, and receive reassurance/next-step messaging.
+- **Scorecard-first UX** – Users upload up to six PNG/JPG/PDF files and get a three-metric scorecard with tailored guidance, rewrites, experiments, and checklists.
+- **Builder-aware insights** – Extras reference the selected builder (Bubble, Webflow, Glide, etc.) so fixes feel native to each tool.
+- **Deterministic fallbacks** – If `OPENAI_API_KEY` is missing, the server still returns seeded variants so the UI stays shareable.
+- **Stripe upgrade flow** – `Generate full build plan ($7/mo)` launches a Stripe Checkout subscription. A dev-only “Test pay” button flags the session as subscribed without hitting Stripe.
+- **PDF library routing** – Place `Confidence_Report_##.pdf` files in `reports/`; `/api/reports/download` finds the closest suffix to the user’s confidence score. A single `example_*.pdf` powers the “See an example” modal.
 
-## Getting started
+## Quickstart
 
 ```bash
 npm install
 npm run dev
 ```
 
-The server boots on `http://localhost:3000` and serves the SPA from `public/`.
+The server runs on `http://localhost:3000` and serves the SPA from `public/`.
 
-### Environment variables
+## Environment variables
 
-Create a `.env` file at the project root (or export these env vars):
+Create a `.env` file (or set these in your deploy platform):
 
 ```bash
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o-2024-08-06        # optional override
-STRIPE_SECRET_KEY=sk_live_...         # optional, enables payments
-STRIPE_PRICE_ID=price_123             # required when Stripe is enabled
-CHECKOUT_SUCCESS_URL=http://localhost:3000/success # use production URL after deploy
-CHECKOUT_CANCEL_URL=http://localhost:3000/cancel   # use production URL after deploy
-TRIAL_DAYS=7                          # optional, Stripe trial length
-PORT=3000                             # optional server port
+OPENAI_API_KEY=sk-...                       # optional; enables live LLM analysis
+OPENAI_MODEL=gpt-4o-2024-08-06              # optional override
+STRIPE_SECRET_KEY=sk_live_...               # required for live payments
+STRIPE_PRICE_ID=price_123                   # required when Stripe is enabled
+STRIPE_WEBHOOK_SECRET=whsec_...             # verify Checkout webhooks
+CHECKOUT_SUCCESS_URL=https://ai-trust.onrender.com/success
+CHECKOUT_CANCEL_URL=https://ai-trust.onrender.com/cancel
+TRIAL_DAYS=0                                # optional Stripe trial length
+PORT=3000                                   # optional server port
+FREE_BUILD_LIMIT=1                          # free “build” allowance before paywall
 ```
 
-- If `OPENAI_API_KEY` is missing, the backend returns a deterministic mock response so the front end stays demo-ready.
-- If `STRIPE_SECRET_KEY` or `STRIPE_PRICE_ID` are missing, `/api/payments/checkout` responds with a 503 and the client surfaces the error.
+- Missing `OPENAI_API_KEY` → responses are generated from seeded templates.
+- Missing Stripe keys → `/api/payments/checkout` returns 503 and the UI shows the error.
 
-### File storage
+## Storage and assets
 
-Uploaded files are placed in `tmp_uploads/` and deleted immediately after each analysis request. Mount this directory to fast ephemeral storage if deploying on platforms like Render, Fly.io, or Railway.
+- Temporary uploads live in `tmp_uploads/` and are deleted right after analysis.
+- Curated reports live in `reports/` (gitignored). Use filenames like `Confidence_Report_45.pdf`. The suffix drives the score matching logic. Include `example_Confidence_Report_88.pdf` (or another `example_*.pdf`) for the modal preview.
 
-### Payment integration
+## Payment flow
 
-Once Stripe keys are present, clicking “Ask AI Sales to build it for you” issues a Checkout session using subscription mode (price defined by `STRIPE_PRICE_ID`). Adjust mode/line items to charge per build or per credit if preferred.
+1. User clicks **Generate full build plan ($7/mo)**.  
+2. `/api/payments/checkout` creates a Stripe Checkout session (subscription mode).  
+3. Stripe redirects back to `/success`; the page immediately fetches `/api/reports/download`.  
+4. The server looks up the last confidence score, selects the closest PDF, and streams it.
+
+Use Stripe’s test cards while `sk_test_*` / `price_test_*` keys are set. To go live, flip the Stripe dashboard out of test mode, generate `sk_live_*` keys + a live price, and update Render env vars. Make sure your `/success` and `/cancel` URLs point at the public domain.
 
 ## Project structure
 
 ```
 public/          # Front-end HTML, CSS, JS
-server/index.js  # Express app, OpenAI + Stripe integrations
-tmp_uploads/     # Runtime temp directory (ignored)
-.env             # Secrets (ignored)
+public/app.js    # Main SPA logic (scorecard, checkout, example modal)
+server/index.js  # Express app, LLM + Stripe integrations, report routing
+reports/         # Curated PDF library (gitignored except .gitkeep)
+tmp_uploads/     # Ephemeral uploads (gitignored)
+.env             # Local secrets (gitignored)
 ```
 
-## Deployment checklist
+## Deploy notes
 
-- Provide the environment variables above (especially OpenAI & Stripe).
-- Ensure the hosting platform can run a Node 18+ process and retain a temp folder.
-- Configure your domain (e.g. https://aisales.com) to point at the Node service.
-- Harden privacy notice & ToS in the UI before public release.
+- Node 18+ runtime required.  
+- On Render, open the service → **Settings → Custom Domains** and add `https://ai-trust.onrender.com/` (or your own hostname). Remove the default name once the new host is active.
+- Mirror the `.env` values in Render’s Environment tab and redeploy.  
+- Before flipping Stripe to live mode, ensure `/privacy` and `/terms` reflect your actual policies.
 
-## Next steps / Phase 2 hooks
+## Roadmap ideas
 
-- Add authenticated sessions (email magic links or SSO) for saved workspaces.
-- Store conversation history + uploaded assets in a database/S3 with signed URLs.
-- Wire the builder CTA to the upcoming exportable builder service once ready.
-- Instrument analytics (PostHog, Amplitude) around tone selection, friction scores, checkout conversions.
-- Add customer support surface (Intercom/Chatwoot) for real-time help.
+- Persist sessions with magic links so users can revisit scorecards.  
+- Store upload history + reports in S3 for longitudinal tracking.  
+- Expand the PDF generator with branded templates and white-label options.  
+- Hook in analytics (PostHog / Amplitude) and live support.  
+- Reintroduce a chat or builder export once Phase 2 is scoped.
 
-This codebase is ready to share with early testers or stakeholders; plug in keys, deploy, and you can collect real-world feedback today.
+Ship the repo as-is to early testers: upload screenshots, review the scorecard, press **Test pay (dev)** for an instant success flow, or connect real Stripe keys when you’re ready to charge.

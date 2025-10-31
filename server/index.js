@@ -229,8 +229,8 @@ app.post('/api/payments/checkout', async (req, res) => {
           quantity: 1
         }
       ],
-      success_url: process.env.CHECKOUT_SUCCESS_URL || 'https://aisales.com/success',
-      cancel_url: process.env.CHECKOUT_CANCEL_URL || 'https://aisales.com/cancel',
+      success_url: process.env.CHECKOUT_SUCCESS_URL || 'https://ai-trust.onrender.com/success',
+      cancel_url: process.env.CHECKOUT_CANCEL_URL || 'https://ai-trust.onrender.com/cancel',
       billing_address_collection: 'auto',
       subscription_data: {
         trial_period_days: Number(process.env.TRIAL_DAYS || 0) || undefined
