@@ -118,11 +118,9 @@ app.post('/api/analyze', upload.array('files'), async (req, res) => {
     appendSessionHistory(session, {
       role: 'ai',
       channel: 'analyze',
-      headline: response.headline,
-      summary: response.summary,
+      summary: `Confidence ${response.scores?.confidence ?? 0}/100 · Clarity ${response.scores?.clarity ?? 0}/100`,
       builder,
       tone,
-      friction: response.friction_score?.numeric || response.frictionScore,
       payload: response
     });
     res.json(response);
@@ -248,7 +246,7 @@ app.post('/api/payments/checkout', async (req, res) => {
         trial_period_days: Number(process.env.TRIAL_DAYS || 0) || undefined
       },
       metadata: {
-        product: 'AI Sales Phase 1 Builder',
+        product: 'AI Trust Phase 1 Builder',
         sessionId: req.sessionId || ''
       }
     });
@@ -302,7 +300,7 @@ app.use((_req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`AI Sales server running on http://localhost:${PORT}`);
+  console.log(`AI Trust server running on http://localhost:${PORT}`);
 });
 
 function sessionMiddleware(req, res, next) {
@@ -372,14 +370,13 @@ async function callAdvisorModel({ prompt, tone, builder, attachments, context = 
   const builderTips = builderGuidance.tips?.join('\n• ') || '';
 
   const systemPrompt = [
-    'You are AI Sales — a senior product advisor and conversion-focused designer.',
+    'You are AI Trust — a senior product advisor and conversion-focused designer.',
     'You review web app screenshots and descriptions to spot friction that scares buyers and highlight trust builders.',
     'Always give direct, actionable steps.',
     'You must not change recommendation depth between tone modes; only adjust wording style.',
     'Tailor the final implementation tips to the user provided builder platform when available.',
-    'If critical context is missing, set needs_followup to true and return clarifying followup_questions instead of generic advice.',
-    'Populate experiments, checklist, and builder_actions only when they add meaningful next steps.',
-    'Set mode to "action_plan" when the response is ready for implementation and can trigger a build plan.',
+    'Return a scorecard with confidence, pushiness, and clarity (0–100), the top three flags with evidence, one free rewrite, one CSS tweak, and summarize three locked insights for the upgrade paywall.',
+    'Populate builder_actions, experiments, and checklist when they materially accelerate implementation.',
     'Respond using the JSON schema provided so that the application can reliably render your feedback.'
   ].join(' ');
 
@@ -409,72 +406,73 @@ async function callAdvisorModel({ prompt, tone, builder, attachments, context = 
 
   const responseFormat = {
     type: 'json_schema',
-    name: 'ai_sales_review',
+    name: 'ai_trust_scorecard',
     schema: {
       type: 'object',
       additionalProperties: false,
-      required: ['headline', 'summary'],
+      required: ['scores', 'flags', 'free_rewrite', 'free_css', 'locked_items'],
       properties: {
-        headline: { type: 'string', description: 'Short sentence summarising the main issue or opportunity.' },
-        summary: { type: 'string', description: 'Concise paragraph overviewing the current state and what matters most.' },
-        mode: { type: 'string', description: 'advisor, clarifying, or action_plan' },
-        needs_followup: { type: 'boolean', description: 'True if AI should ask user for more context before a full plan.' },
-        followup_questions: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Clarifying questions to ask the user before delivering a full review.'
-        },
-        friction_score: {
+        scores: {
           type: 'object',
           additionalProperties: false,
-          required: ['numeric', 'label', 'rationale'],
+          required: ['confidence', 'pushiness', 'clarity'],
           properties: {
-            numeric: { type: 'integer', minimum: 1, maximum: 5, description: '1 = very low friction, 5 = very high friction.' },
-            label: { type: 'string', description: 'Label describing the numeric score.' },
-            rationale: { type: 'string', description: 'Why the score was chosen.' }
+            confidence: { type: 'integer', minimum: 0, maximum: 100 },
+            pushiness: { type: 'integer', minimum: 0, maximum: 100 },
+            clarity: { type: 'integer', minimum: 0, maximum: 100 }
           }
         },
-        findings: {
+        flags: {
           type: 'array',
+          minItems: 1,
           items: {
             type: 'object',
             additionalProperties: false,
-            required: ['title', 'detail'],
+            required: ['title', 'detail', 'evidence'],
             properties: {
               title: { type: 'string' },
               detail: { type: 'string' },
-              impact: { type: 'string', description: 'Optional severity or confidence note.' }
+              evidence: { type: 'string', description: 'Quote or description of the trigger.' }
             }
           }
         },
-        builder_actions: {
+        free_rewrite: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['before', 'after'],
+          properties: {
+            before: { type: 'string' },
+            after: { type: 'string' },
+            rationale: { type: 'string' }
+          }
+        },
+        free_css: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['selector', 'change'],
+          properties: {
+            selector: { type: 'string' },
+            change: { type: 'string' },
+            rationale: { type: 'string' }
+          }
+        },
+        locked_items: {
           type: 'array',
+          minItems: 1,
           items: {
             type: 'object',
             additionalProperties: false,
-            required: ['title', 'detail'],
+            required: ['title', 'summary'],
             properties: {
               title: { type: 'string' },
-              detail: { type: 'string' },
-              estimate: { type: 'string', description: 'Optional effort/time estimate.' }
+              summary: { type: 'string' }
             }
           }
         },
-        experiments: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Optional list of A/B tests or metrics to monitor.'
-        },
-        checklist: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Optional bullet list of quick fixes or QA checks.'
-        },
-        reassurance: { type: 'string', description: 'Closing reassurance or guidance for next steps.' },
-        suggested_prompts: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Optional suggestions for what the user could ask next.'
+        metadata: {
+          type: 'object',
+          additionalProperties: true,
+          description: 'Optional supporting metadata (builder actions, experiments, etc.)'
         }
       }
     }
@@ -538,10 +536,10 @@ async function callAdvisorModel({ prompt, tone, builder, attachments, context = 
       throw new Error('Model did not return structured payload.');
     }
 
-    return normalizeLLMResponse(structured, { tone, builder });
+    return normalizeScorecardResponse(structured, { tone, builder });
   } catch (error) {
     console.error('Falling back to simulated advisor output:', error.message);
-    return simulateAdvisorResponse({ prompt, tone, builder, attachments });
+    return simulateAdvisorResponse({ tone, builder });
   }
 }
 
@@ -558,7 +556,7 @@ async function callBuilderModel({ prompt, tone, builder, attachments, context = 
   const builderTips = builderGuidance.tips?.join('\n• ') || '';
 
   const systemPrompt = [
-    'You are AI Sales — a senior product engineer and product designer hybrid.',
+    'You are AI Trust — a senior product engineer and product designer hybrid.',
     'Given a product brief and optional visuals, produce a concise build-ready plan that contains screens, flows, data model, and builder-specific steps.',
     'Keep instructions technology-aware based on the provided builder, and surface actionable export hints.',
     'Respond using the JSON schema so the application can render the plan reliably.'
@@ -743,84 +741,8 @@ async function callBuilderModel({ prompt, tone, builder, attachments, context = 
   return normalizeBuildPlan(structured, { builder });
 }
 
-function simulateAdvisorResponse({ prompt, tone, builder, attachments }) {
-  const toneGuidance = getToneGuidance(tone);
-  const builderGuidance = getBuilderGuidance(builder);
-  const visualNote = attachments.length
-    ? `I reviewed ${attachments.length} visual asset${attachments.length > 1 ? 's' : ''}. `
-    : 'I do not have visuals yet, so this read is based on your description. ';
-
-  const headline =
-    tone === 'low-tech'
-      ? 'Here is what will make things smoother:'
-      : tone === 'mid-tech'
-      ? 'Here is a clear plan with light terminology:'
-      : 'Detailed playbook with full terminology:';
-
-  const frictionScore = mockScore(prompt, attachments.length);
-  const suggestions = [
-    {
-      title: 'Tighten the hero narrative',
-      detail: toneGuidance.rewrite(
-        'State the problem, outcome, and credibility signal in one hero block, with the primary call-to-action visible without scrolling.'
-      )
-    },
-    {
-      title: 'De-risk the next click',
-      detail: toneGuidance.rewrite(
-        'Clarify pricing or onboarding time near the call-to-action so visitors feel safe proceeding.'
-      )
-    }
-  ];
-
-  const builderActions = [
-    {
-      title: `Implement inside ${builderGuidance.label}`,
-      detail: toneGuidance.rewrite(
-        builderGuidance.tips?.[0] ||
-          'Apply the adjustments in your builder using the guidance above, focusing on hierarchy, spacing, and CTA styling.'
-      )
-    }
-  ];
-
-  return {
-    mode: 'advisor',
-    builder,
-    frictionScore,
-    frictionLabel: scoreLabel(frictionScore),
-    frictionRationale: toneGuidance.rewrite(
-      'Focus on clarity of promise, supportive evidence, and remove visual distractions so customers feel in control.'
-    ),
-    headline,
-    summary: `${visualNote}Estimated client friction: ${scoreLabel(frictionScore)}.`,
-    suggestions,
-    builderActions,
-    experiments: [toneGuidance.rewrite('Run a before/after user test focused on the hero and pricing sections to confirm the improvements.')],
-    checklist: [toneGuidance.rewrite('Double-check mobile spacing, CTA contrast, and add proof directly under the hero block.')],
-    followup_questions: [],
-    needs_followup: false,
-    reassurance: toneGuidance.rewrite(
-      'You can ask for more detail on any step, or let AI Sales draft the screens when you are ready.'
-    ),
-    suggestedPrompts: [
-      'Show me a revised hero copy and hierarchy.',
-      `Give me a checklist to update in ${builderGuidance.label === builder ? builder : 'my builder'}.`
-    ],
-    raw: {
-      headline,
-      summary: `${visualNote}Estimated client friction: ${scoreLabel(frictionScore)}.`,
-      friction_score: {
-        numeric: frictionScore,
-        label: scoreLabel(frictionScore),
-        rationale: 'Based on spacing, messaging, and proof signals described.'
-      },
-      findings: suggestions,
-      builder_actions: builderActions,
-      reassurance: toneGuidance.rewrite(
-        'You can ask for more detail on any step, or let AI Sales draft the screens when you are ready.'
-      )
-    }
-  };
+function simulateAdvisorResponse({ tone, builder }) {
+  return fallbackScorecard({ tone, builder });
 }
 
 function simulateBuilderPlan({ prompt, builder }) {
@@ -930,43 +852,64 @@ function normalizeBuildPlan(structured, { builder }) {
   };
 }
 
-function normalizeLLMResponse(payload, { tone, builder }) {
+function normalizeScorecardResponse(payload, { tone, builder }) {
   const parsed = typeof payload === 'string' ? safeJsonParse(payload) : payload;
-  const fallbackText = typeof payload === 'string' ? payload : JSON.stringify(payload || {});
+  if (!parsed || typeof parsed !== 'object') {
+    return fallbackScorecard({ tone, builder });
+  }
 
-  const frictionData = parsed?.friction_score || {};
-  const frictionNumeric = Number.isFinite(frictionData.numeric) ? frictionData.numeric : extractScore(fallbackText);
-  const frictionLabel = frictionData.label || scoreLabel(frictionNumeric);
-  const frictionRationale = frictionData.rationale || extractReassurance(fallbackText);
+  const scores = parsed.scores || {};
+  const flags = Array.isArray(parsed.flags) ? parsed.flags : [];
+  const freeRewrite = parsed.free_rewrite || {};
+  const freeCss = parsed.free_css || {};
+  const lockedItems = Array.isArray(parsed.locked_items) ? parsed.locked_items : [];
+  const metadata = parsed.metadata || {};
 
-  const findings = Array.isArray(parsed?.findings) && parsed.findings.length > 0 ? parsed.findings : extractSuggestions(fallbackText);
-  const builderActions = Array.isArray(parsed?.builder_actions) && parsed.builder_actions.length > 0 ? parsed.builder_actions : findings;
+  const builderActions = Array.isArray(metadata.builder_actions)
+    ? metadata.builder_actions
+    : Array.isArray(metadata.builderSteps)
+    ? metadata.builderSteps
+    : [];
+  const experiments = Array.isArray(metadata.experiments) ? metadata.experiments : [];
+  const checklist = Array.isArray(metadata.checklist) ? metadata.checklist : [];
+
+  const normalizedScores = {
+    confidence: clampScore(scores.confidence ?? metadata.confidence ?? 52),
+    pushiness: clampScore(scores.pushiness ?? metadata.pushiness ?? 58),
+    clarity: clampScore(scores.clarity ?? metadata.clarity ?? 60)
+  };
 
   return {
-    mode: parsed?.mode || tone,
     builder,
-    raw: parsed,
-    headline: parsed?.headline || findings?.[0]?.title || 'Here is what I noticed:',
-    summary: parsed?.summary || fallbackText,
-    frictionScore: frictionNumeric,
-    frictionLabel,
-    frictionRationale,
-    suggestions: (parsed?.findings || findings).map((item, idx) => ({
-      title: item.title || `Insight ${idx + 1}`,
-      detail: item.detail || (typeof item === 'string' ? item : JSON.stringify(item)),
-      impact: item.impact || undefined
+    tone,
+    scores: normalizedScores,
+    flags: flags.slice(0, 3).map((flag) => ({
+      title: flag.title || 'Issue',
+      detail: flag.detail || 'Needs clarification.',
+      evidence: flag.evidence || flag.quote || 'No evidence provided.'
     })),
-    builderActions: (parsed?.builder_actions || builderActions).map((item, idx) => ({
-      title: item.title || `Builder step ${idx + 1}`,
-      detail: item.detail || (typeof item === 'string' ? item : JSON.stringify(item)),
-      estimate: item.estimate || undefined
+    freeRewrite: {
+      before: freeRewrite.before || 'Original copy unavailable.',
+      after: freeRewrite.after || 'Rewrite unavailable.',
+      rationale: freeRewrite.rationale || 'Refine your messaging for clarity and trust.'
+    },
+    freeCss: {
+      selector: freeCss.selector || ':root',
+      change: freeCss.change || 'Adjust spacing and typography tokens for readability.',
+      rationale: freeCss.rationale || 'Improves scanability and reduces cognitive load.'
+    },
+    lockedInsights: lockedItems.map((item) => ({
+      title: item.title || 'Additional insight',
+      summary: item.summary || 'Unlock the full plan to view this insight.'
     })),
-    experiments: parsed?.experiments || [],
-    checklist: parsed?.checklist || [],
-    followupQuestions: parsed?.followup_questions || [],
-    needsFollowup: Boolean(parsed?.needs_followup),
-    reassurance: parsed?.reassurance || frictionRationale,
-    suggestedPrompts: parsed?.suggested_prompts || []
+    builderActions: builderActions.map((item, idx) => ({
+      title: item.title || `Builder action ${idx + 1}`,
+      detail: item.detail || item.summary || 'See builder guidance in the knowledge base.'
+    })),
+    experiments,
+    checklist,
+    metadata,
+    autoBuildHint: lockedItems.length > 0
   };
 }
 
@@ -1368,7 +1311,7 @@ function buildSessionHistoryContext(history = []) {
   const lines = [];
   history.slice(sliceStart).forEach((entry) => {
     if (!entry) return;
-    const roleLabel = entry.role === 'ai' ? 'AI Sales' : 'User';
+    const roleLabel = entry.role === 'ai' ? 'AI Trust' : 'User';
     const channel = entry.channel ? `·${entry.channel}` : '';
     const builder = entry.builder ? `·${entry.builder}` : '';
 
@@ -1380,6 +1323,73 @@ function buildSessionHistoryContext(history = []) {
   });
 
   return lines.join('\n');
+}
+
+function clampScore(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 50;
+  if (num < 0) return 0;
+  if (num > 100) return 100;
+  return Math.round(num);
+}
+
+function fallbackScorecard({ tone, builder }) {
+  const guidance = getBuilderGuidance(builder);
+  const tipList = Array.isArray(guidance.tips) ? guidance.tips : [];
+
+  return {
+    builder,
+    tone,
+    scores: { confidence: 55, pushiness: 45, clarity: 60 },
+    flags: [
+      {
+        title: 'Unclear promise',
+        detail: 'Hero copy mixes multiple outcomes, making it unclear what happens next.',
+        evidence: 'Headline and subheadline should focus on a single transformation and CTA.'
+      },
+      {
+        title: 'Weak proof',
+        detail: 'Above-the-fold experience lacks trust anchors like logos or testimonials.',
+        evidence: 'Add logos or customer quotes directly beneath the main CTA.'
+      },
+      {
+        title: 'CTA ambiguity',
+        detail: 'Button copy does not explain what happens after clicking.',
+        evidence: 'Clarify the outcome (e.g., “Start a 14-day Base44 trial”).'
+      }
+    ],
+    freeRewrite: {
+      before: 'All-in-one platform that does everything for everyone.',
+      after: 'Launch high-converting demos in Base44, tailored to B2B buyers in under 48 hours.',
+      rationale: 'Sharpens the promise and targets the primary audience outcome.'
+    },
+    freeCss: {
+      selector: '.hero-section .cta',
+      change: 'background: #ffffff; color: #0b0b0b; border-radius: 14px; padding: 16px 28px;',
+      rationale: 'Boosts button contrast and perceived clickability.'
+    },
+    lockedInsights: [
+      {
+        title: 'Pricing page teardown',
+        summary: 'Breaks down the friction points across tiers and proposes a simplified layout.'
+      },
+      {
+        title: 'Trust signal roadmap',
+        summary: 'Recommends proof anchors, testimonial placement, and social validation steps.'
+      },
+      {
+        title: 'Conversion experiment kit',
+        summary: 'Outlines three A/B tests with metrics and setup guides tailored to your builder.'
+      }
+    ],
+    builderActions: tipList.slice(0, 2).map((tip, idx) => ({
+      title: idx === 0 ? `Start inside ${guidance.label}` : 'Polish with design tokens',
+      detail: tip
+    })),
+    experiments: ['Run a before/after usability test focusing on first-click success.'],
+    checklist: ['Verify mobile spacing in hero section.', 'Add success metrics near primary CTA.'],
+    metadata: {}
+  };
 }
 
 async function handleStripeWebhook(event) {

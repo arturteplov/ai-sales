@@ -1,4 +1,4 @@
-# AI Sales – Phase 1 Advisor App
+# AI Trust – Phase 1 Advisor App
 
 Full-stack implementation of the Phase 1 “Recommended advisor + follow-up builder” experience. The app serves a zero-login chat workspace, ingests screenshots, communicates with OpenAI (or a local simulator) for advice, and exposes a Stripe checkout entry point for the upcoming builder subscription.
 
@@ -44,7 +44,7 @@ Uploaded files are placed in `tmp_uploads/` and deleted immediately after each a
 
 ### Payment integration
 
-Once Stripe keys are present, clicking “Ask AI Sales to build it for you” issues a Checkout session using subscription mode (price defined by `STRIPE_PRICE_ID`). Adjust mode/line items to charge per build or per credit if preferred.
+Once Stripe keys are present, clicking “Ask AI Trust to build it for you” issues a Checkout session using subscription mode (price defined by `STRIPE_PRICE_ID`). Adjust mode/line items to charge per build or per credit if preferred.
 
 ## Project structure
 
