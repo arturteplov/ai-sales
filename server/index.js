@@ -343,9 +343,9 @@ app.get('/api/reports/example', (_req, res) => {
       return res.status(404).json({ error: 'not_found', message: 'No example report available.' });
     }
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename="ai-trust-example-report.pdf"');
-    res.setHeader('Content-Length', example.length);
-    res.send(example);
+    res.setHeader('Content-Disposition', `inline; filename="${example.filename || 'ai-trust-example-report.pdf'}"`);
+    res.setHeader('Content-Length', example.buffer.length);
+    res.send(example.buffer);
   } catch (error) {
     console.error('Example report error:', error);
     res.status(500).json({ error: 'example_unavailable', message: 'Could not load example report.' });
@@ -1334,12 +1334,10 @@ function getExampleReport() {
     const exampleEntries = entries.filter(
       (entry) => entry.isFile() && entry.name.toLowerCase().startsWith('example_') && entry.name.toLowerCase().endsWith('.pdf')
     );
-    if (exampleEntries.length > 0) {
-      const choice = exampleEntries[Math.floor(Math.random() * exampleEntries.length)];
-      return fs.readFileSync(path.join(REPORT_LIBRARY_DIR, choice.name));
-    }
-    const fallback = pickLibraryReportForScore(75);
-    return fallback ? fallback.buffer : null;
+    if (exampleEntries.length === 0) return null;
+    const choice = exampleEntries[Math.floor(Math.random() * exampleEntries.length)];
+    console.log('[reports] Serving example report', choice.name);
+    return { buffer: fs.readFileSync(path.join(REPORT_LIBRARY_DIR, choice.name)), filename: choice.name };
   } catch (error) {
     console.warn('Unable to read example report:', error.message);
     return null;
