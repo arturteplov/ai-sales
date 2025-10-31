@@ -30,7 +30,9 @@ const state = {
   intakeAnswers: [],
   intakeQuestionIndex: 0,
   awaitingIntake: false,
-  expectingIntakeAnswer: false
+  expectingIntakeAnswer: false,
+  dynamicIntakeQuestions: [],
+  pendingFollowups: []
 };
 
 const toneLabels = {
@@ -364,6 +366,22 @@ function renderMessages() {
       wrapper.appendChild(renderStepSection(builderTitle, builderActions));
     }
 
+    if (Array.isArray(message.experiments) && message.experiments.length) {
+      wrapper.appendChild(renderBulletSection('Experiments to try', message.experiments));
+    }
+
+    if (Array.isArray(message.checklist) && message.checklist.length) {
+      wrapper.appendChild(renderBulletSection('Checklist', message.checklist));
+    }
+
+    if (Array.isArray(message.followupQuestions) && message.followupQuestions.length) {
+      wrapper.appendChild(renderBulletSection('Follow-up questions', message.followupQuestions));
+    }
+
+    if (message.autoBuildHint && state.builder && state.builder !== 'No builder') {
+      wrapper.appendChild(renderAutoBuildCTA());
+    }
+
     if (message.reassurance) {
       const reassurance = document.createElement('div');
       reassurance.className = 'helper-text reassurance';
@@ -395,6 +413,9 @@ function renderMessages() {
   });
 
   dom.messagesBox.scrollTop = dom.messagesBox.scrollHeight;
+
+  const autoBuildButtons = dom.messagesBox.querySelectorAll('[data-action="auto-build"]');
+  autoBuildButtons.forEach((btn) => btn.addEventListener('click', handleAutoBuild));
 }
 
 function renderStepSection(title, steps) {
@@ -422,6 +443,51 @@ function renderStepSection(title, steps) {
 
   section.appendChild(list);
   return section;
+}
+
+function renderBulletSection(title, items) {
+  const section = document.createElement('div');
+  section.className = 'message-section';
+  const heading = document.createElement('div');
+  heading.className = 'section-title';
+  heading.textContent = title;
+  section.appendChild(heading);
+
+  const list = document.createElement('ul');
+  list.className = 'bullet-list';
+
+  items.forEach((item) => {
+    const li = document.createElement('li');
+    li.textContent = typeof item === 'string' ? item : JSON.stringify(item);
+    list.appendChild(li);
+  });
+
+  section.appendChild(list);
+  return section;
+}
+
+function renderAutoBuildCTA() {
+  const section = document.createElement('div');
+  section.className = 'message-section';
+
+  const heading = document.createElement('div');
+  heading.className = 'section-title';
+  heading.textContent = 'Accelerate implementation';
+  section.appendChild(heading);
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'ghost-link primary-build auto-build';
+  button.dataset.action = 'auto-build';
+  button.textContent = `Generate ${state.builder} build plan`;
+  section.appendChild(button);
+
+  return section;
+}
+
+function handleAutoBuild(event) {
+  if (event?.preventDefault) event.preventDefault();
+  requestBuild();
 }
 
 function setupDragAndDrop() {
@@ -535,11 +601,28 @@ async function sendAdvisorRequest(promptText) {
       headline: formatted.headline,
       summary: formatted.summary,
       insights: formatted.insights,
-      builderActions: formatted.builderSteps,
+      builderActions: formatted.builderActions,
+      experiments: formatted.experiments,
+      checklist: formatted.checklist,
+      followupQuestions: formatted.followupQuestions,
+      needsFollowup: formatted.needsFollowup,
+      mode: formatted.mode,
+      autoBuildHint: formatted.autoBuildHint,
       reassurance: formatted.reassurance,
       suggestedPrompts: formatted.suggestedPrompts,
       builder: state.builder
     });
+
+    if (formatted.needsFollowup && formatted.followupQuestions.length > 0) {
+      state.intakeSeed = promptText;
+      startIntake(promptText, formatted.followupQuestions, { skipInitialPrompt: true });
+      showToast('Answer the follow-up questions so I can go deeper.');
+    } else {
+      state.dynamicIntakeQuestions = [];
+      state.pendingFollowups = [];
+      state.awaitingIntake = false;
+      state.expectingIntakeAnswer = false;
+    }
 
     state.files = [];
     renderFilePreview();
@@ -675,14 +758,34 @@ function formatAdvisorResponse(data) {
     data.summary ||
     'Summary not provided. Ask AI Sales to expand on any section you need more detail for.';
 
+  const mode = data.mode || 'advisor';
+  const followupQuestions = Array.isArray(data.followupQuestions || data.followup_questions)
+    ? (data.followupQuestions || data.followup_questions)
+    : [];
+  const experiments = Array.isArray(data.experiments) ? data.experiments : [];
+  const checklist = Array.isArray(data.checklist) ? data.checklist : [];
+  const needsFollowup = Boolean(data.needsFollowup || data.needs_followup);
+  const builderActions = Array.isArray(data.builderActions) ? data.builderActions : [];
+  const insights = Array.isArray(data.insights || data.suggestions) ? data.insights || data.suggestions : [];
+
+  const autoBuildHint =
+    Boolean(data.autoBuildHint) ||
+    (builderActions.length > 0 && state.builder && state.builder !== 'No builder');
+
   return {
     headline,
     summary,
     frictionScore: data.frictionScore || '–',
     frictionLabel: data.frictionLabel || null,
     frictionRationale: data.frictionRationale || null,
-    insights: Array.isArray(data.suggestions) ? data.suggestions : [],
-    builderActions: Array.isArray(data.builderActions) ? data.builderActions : [],
+    mode,
+    needsFollowup,
+    followupQuestions,
+    insights,
+    builderActions,
+    experiments,
+    checklist,
+    autoBuildHint,
     reassurance:
       data.reassurance ||
       'Let me know if you want deeper breakdowns, more examples, or to draft the next flow.',
@@ -869,7 +972,7 @@ function buildConversationContext(currentPrompt = '') {
     }
   });
 
-  return lines.join('\n').slice(0, INTAKE_CONTEX_LENGTH);
+  return lines.join('\n').slice(0, INTAKE_CONTENT_LENGTH);
 }
 
 function flattenMessage(message) {
@@ -915,12 +1018,19 @@ function normalizeText(value = '') {
   return (value || '').toString().trim().toLowerCase();
 }
 
-const INTAKE_CONTEX_LENGTH = 2000;
+const INTAKE_CONTENT_LENGTH = 2000;
 const MAX_HISTORY_TURNS = 6;
+const MIN_INTAKE_ANSWER_LEN = 18;
 
 function handleUserInput(text) {
   if (state.awaitingIntake) {
     if (state.expectingIntakeAnswer) {
+      const questions = getIntakeQuestions();
+      const questionText = questions[state.intakeQuestionIndex] || '';
+      if (!isAnswerSufficient(text, state.intakeQuestionIndex, questionText)) {
+        nudgeForMoreDetail();
+        return;
+      }
       recordIntakeAnswer(text);
       return;
     }
@@ -941,12 +1051,21 @@ function handleUserInput(text) {
   sendAdvisorRequest(text);
 }
 
-function startIntake(seedPrompt) {
+function startIntake(seedPrompt, questions = null, options = {}) {
+  const providedQuestions = Array.isArray(questions) ? questions.filter(Boolean) : [];
   state.intakeSeed = seedPrompt;
   state.intakeAnswers = [];
   state.intakeQuestionIndex = 0;
   state.awaitingIntake = true;
   state.expectingIntakeAnswer = false;
+  state.dynamicIntakeQuestions = providedQuestions;
+  state.pendingFollowups = providedQuestions.slice();
+
+  if (options.skipInitialPrompt) {
+    state.expectingIntakeAnswer = true;
+    return;
+  }
+
   askNextIntakeQuestion();
 }
 
@@ -954,6 +1073,7 @@ function recordIntakeAnswer(answer) {
   state.intakeAnswers.push(answer);
   state.expectingIntakeAnswer = false;
   state.intakeQuestionIndex += 1;
+  state.pendingFollowups = state.pendingFollowups.slice(1);
 
   if (state.intakeQuestionIndex >= getIntakeQuestions().length) {
     finalizeIntake();
@@ -971,7 +1091,7 @@ function askNextIntakeQuestion() {
   }
 
   const toneIntro =
-    state.intakeQuestionIndex === 0
+    state.intakeQuestionIndex === 0 && state.dynamicIntakeQuestions.length === 0
       ? 'Before I craft the plan, let me understand a few things.'
       : undefined;
 
@@ -985,6 +1105,16 @@ function askNextIntakeQuestion() {
   state.expectingIntakeAnswer = true;
 }
 
+function nudgeForMoreDetail() {
+  const followups = [
+    'Feel free to give me a little more context—what audience or outcome are you targeting?',
+    'Got it. If you expand on the challenge a bit more, I can be more precise.',
+    'I want to nail this. Share a quick detail about the flow or friction you are seeing.'
+  ];
+  const message = followups[state.intakeQuestionIndex % followups.length];
+  addMessage('ai', message);
+}
+
 function finalizeIntake() {
   const intakeSummary = composeIntakePrompt();
   state.awaitingIntake = false;
@@ -992,6 +1122,8 @@ function finalizeIntake() {
   state.intakeSeed = '';
   state.intakeAnswers = [];
   state.intakeQuestionIndex = 0;
+  state.dynamicIntakeQuestions = [];
+  state.pendingFollowups = [];
   state.lastPrompt = intakeSummary;
   sendAdvisorRequest(intakeSummary);
 }
@@ -1022,6 +1154,10 @@ function composeIntakePrompt() {
 }
 
 function getIntakeQuestions() {
+  if (Array.isArray(state.dynamicIntakeQuestions) && state.dynamicIntakeQuestions.length > 0) {
+    return state.dynamicIntakeQuestions;
+  }
+
   const builder = state.builder || 'No builder';
   const builderPrompt =
     builder === 'No builder'
@@ -1044,5 +1180,44 @@ function requiresFreshIntake(text) {
   if (followUpCue && state.conversation.length > 1) {
     return true;
   }
+  if (state.pendingFollowups.length > 0) return true;
   return false;
+}
+
+function isAnswerSufficient(text, questionIndex, questionText = '') {
+  const normalized = normalizeText(text);
+  if (!normalized) return false;
+  if (normalized.length < MIN_INTAKE_ANSWER_LEN) return false;
+
+  const fillerPatterns = [
+    /^i (don'?t)? know/,
+    /^not sure/,
+    /^no idea/,
+    /^[hw]i$/, // hi, wi (typo)
+    /^hello$/,
+    /^hey$/,
+    /^thanks?$/
+  ];
+  if (fillerPatterns.some((regex) => regex.test(normalized))) return false;
+
+  if (questionIndex === 0) {
+    if (!/(user|customers?|audience|people|buyers|visitors|team|client)/.test(normalized)) {
+      return false;
+    }
+  }
+
+  if (questionText) {
+    const askGoal = /outcome|goal|achieve|need them/i.test(questionText);
+    if (askGoal && !/(goal|convert|signup|purchase|book|register|subscribe|download)/.test(normalized)) {
+      return false;
+    }
+  }
+
+  if (questionIndex === 1) {
+    if (!/(drop|weak|problem|issue|struggl|confus|bounce|fail|low|stuck|pain)/.test(normalized)) {
+      return false;
+    }
+  }
+
+  return true;
 }

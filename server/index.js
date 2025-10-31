@@ -78,6 +78,7 @@ app.get('/api/session', (req, res) => {
 app.post('/api/analyze', upload.array('files'), async (req, res) => {
   const { prompt = '', tone = 'low-tech', builder = 'Bubble', context = '' } = req.body || {};
   const files = req.files || [];
+  const session = req.session || {};
 
   if (!prompt.trim() && files.length === 0) {
     cleanupFiles(files);
@@ -85,6 +86,17 @@ app.post('/api/analyze', upload.array('files'), async (req, res) => {
   }
 
   try {
+    appendSessionHistory(session, {
+      role: 'user',
+      channel: 'analyze',
+      prompt,
+      builder,
+      tone,
+      context,
+      attachments: files.length
+    });
+
+    const sessionContext = buildSessionHistoryContext(session.history || []);
     const attachments = await Promise.all(
       files.map(async (file) => ({
         name: file.originalname,
@@ -98,10 +110,21 @@ app.post('/api/analyze', upload.array('files'), async (req, res) => {
       tone,
       builder,
       attachments,
-      context
+      context,
+      sessionContext
     });
 
     cleanupFiles(files);
+    appendSessionHistory(session, {
+      role: 'ai',
+      channel: 'analyze',
+      headline: response.headline,
+      summary: response.summary,
+      builder,
+      tone,
+      friction: response.friction_score?.numeric || response.frictionScore,
+      payload: response
+    });
     res.json(response);
   } catch (error) {
     console.error('Advisor error:', error);
@@ -134,6 +157,17 @@ app.post('/api/build', upload.array('files'), async (req, res) => {
   }
 
   try {
+    appendSessionHistory(session, {
+      role: 'user',
+      channel: 'build',
+      prompt,
+      builder,
+      tone,
+      context,
+      attachments: files.length
+    });
+
+    const sessionContext = buildSessionHistoryContext(session.history || []);
     const attachments = await Promise.all(
       files.map(async (file) => ({
         name: file.originalname,
@@ -147,13 +181,24 @@ app.post('/api/build', upload.array('files'), async (req, res) => {
       tone,
       builder,
       attachments,
-      context
+      context,
+      sessionContext
     });
 
     cleanupFiles(files);
 
     session.buildsUsed = (session.buildsUsed || 0) + 1;
     session.lastBuild = { id: buildPlan.buildId, createdAt: Date.now(), summary: buildPlan.summary };
+
+    appendSessionHistory(session, {
+      role: 'ai',
+      channel: 'build',
+      headline: buildPlan.headline,
+      summary: buildPlan.summary,
+      builder,
+      tone,
+      payload: buildPlan
+    });
 
     const remainingFree = session.isSubscribed
       ? null
@@ -274,13 +319,17 @@ function sessionMiddleware(req, res, next) {
         buildsUsed: 0,
         isSubscribed: false,
         stripeCustomerId: null,
-        lastBuild: null
+        lastBuild: null,
+        history: []
       });
       setCookie(res, SESSION_COOKIE, sessionId, { httpOnly: true, sameSite: 'Lax', maxAge: 31536000 });
     }
 
     const session = SESSION_STORE.get(sessionId);
     session.updatedAt = Date.now();
+    if (!Array.isArray(session.history)) {
+      session.history = [];
+    }
 
     req.sessionId = sessionId;
     req.session = session;
@@ -306,7 +355,7 @@ async function fileToBase64(filePath) {
   return data.toString('base64');
 }
 
-async function callAdvisorModel({ prompt, tone, builder, attachments, context = '' }) {
+async function callAdvisorModel({ prompt, tone, builder, attachments, context = '', sessionContext = '' }) {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (isSmallTalkPrompt(prompt, attachments)) {
@@ -319,6 +368,8 @@ async function callAdvisorModel({ prompt, tone, builder, attachments, context = 
 
   const toneGuidance = getToneGuidance(tone);
   const builderGuidance = getBuilderGuidance(builder);
+  const builderKnowledge = builderGuidance.knowledge?.join(' ') || '';
+  const builderTips = builderGuidance.tips?.join('\n• ') || '';
 
   const systemPrompt = [
     'You are AI Sales — a senior product advisor and conversion-focused designer.',
@@ -326,11 +377,16 @@ async function callAdvisorModel({ prompt, tone, builder, attachments, context = 
     'Always give direct, actionable steps.',
     'You must not change recommendation depth between tone modes; only adjust wording style.',
     'Tailor the final implementation tips to the user provided builder platform when available.',
+    'If critical context is missing, set needs_followup to true and return clarifying followup_questions instead of generic advice.',
+    'Populate experiments, checklist, and builder_actions only when they add meaningful next steps.',
+    'Set mode to "action_plan" when the response is ready for implementation and can trigger a build plan.',
     'Respond using the JSON schema provided so that the application can reliably render your feedback.'
   ].join(' ');
 
-  const contextSection = context
-    ? [`Conversation context so far:\n${context.slice(0, 2000)}`]
+  const mergedContext = [sessionContext, context].filter(Boolean).join('\n\n---\n\n');
+
+  const contextSection = mergedContext
+    ? [`Conversation context so far:\n${mergedContext.slice(0, 2000)}`]
     : [];
 
   const primaryPromptSection = [
@@ -357,45 +413,62 @@ async function callAdvisorModel({ prompt, tone, builder, attachments, context = 
     schema: {
       type: 'object',
       additionalProperties: false,
-      required: ['headline', 'summary', 'friction_score', 'findings', 'builder_actions', 'reassurance', 'suggested_prompts'],
+      required: ['headline', 'summary'],
       properties: {
         headline: { type: 'string', description: 'Short sentence summarising the main issue or opportunity.' },
         summary: { type: 'string', description: 'Concise paragraph overviewing the current state and what matters most.' },
+        mode: { type: 'string', description: 'advisor, clarifying, or action_plan' },
+        needs_followup: { type: 'boolean', description: 'True if AI should ask user for more context before a full plan.' },
+        followup_questions: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Clarifying questions to ask the user before delivering a full review.'
+        },
         friction_score: {
           type: 'object',
           additionalProperties: false,
           required: ['numeric', 'label', 'rationale'],
           properties: {
             numeric: { type: 'integer', minimum: 1, maximum: 5, description: '1 = very low friction, 5 = very high friction.' },
-            label: { type: 'string', description: 'Label describing the numeric score (e.g., Very Low, Low, Moderate, Elevated, High).' },
+            label: { type: 'string', description: 'Label describing the numeric score.' },
             rationale: { type: 'string', description: 'Why the score was chosen.' }
           }
         },
         findings: {
           type: 'array',
-          minItems: 1,
           items: {
             type: 'object',
             additionalProperties: false,
             required: ['title', 'detail'],
             properties: {
               title: { type: 'string' },
-              detail: { type: 'string' }
+              detail: { type: 'string' },
+              impact: { type: 'string', description: 'Optional severity or confidence note.' }
             }
           }
         },
         builder_actions: {
           type: 'array',
-          minItems: 1,
           items: {
             type: 'object',
             additionalProperties: false,
             required: ['title', 'detail'],
             properties: {
               title: { type: 'string' },
-              detail: { type: 'string' }
+              detail: { type: 'string' },
+              estimate: { type: 'string', description: 'Optional effort/time estimate.' }
             }
           }
+        },
+        experiments: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional list of A/B tests or metrics to monitor.'
+        },
+        checklist: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional bullet list of quick fixes or QA checks.'
         },
         reassurance: { type: 'string', description: 'Closing reassurance or guidance for next steps.' },
         suggested_prompts: {
@@ -415,7 +488,19 @@ async function callAdvisorModel({ prompt, tone, builder, attachments, context = 
         content: [
           { type: 'input_text', text: systemPrompt },
           { type: 'input_text', text: toneGuidance.system },
-          { type: 'input_text', text: builderGuidance.system }
+          { type: 'input_text', text: builderGuidance.systemPrompt },
+          builderKnowledge
+            ? {
+                type: 'input_text',
+                text: `Builder knowledge base:\n${builderKnowledge}`
+              }
+            : null,
+          builderTips
+            ? {
+                type: 'input_text',
+                text: `Builder execution tips:\n• ${builderTips}`
+              }
+            : null
         ]
       },
       {
@@ -460,7 +545,7 @@ async function callAdvisorModel({ prompt, tone, builder, attachments, context = 
   }
 }
 
-async function callBuilderModel({ prompt, tone, builder, attachments, context = '' }) {
+async function callBuilderModel({ prompt, tone, builder, attachments, context = '', sessionContext = '' }) {
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -469,6 +554,8 @@ async function callBuilderModel({ prompt, tone, builder, attachments, context = 
 
   const builderGuidance = getBuilderGuidance(builder);
   const toneGuidance = getToneGuidance(tone);
+  const builderKnowledge = builderGuidance.knowledge?.join(' ') || '';
+  const builderTips = builderGuidance.tips?.join('\n• ') || '';
 
   const systemPrompt = [
     'You are AI Sales — a senior product engineer and product designer hybrid.',
@@ -477,8 +564,9 @@ async function callBuilderModel({ prompt, tone, builder, attachments, context = 
     'Respond using the JSON schema so the application can render the plan reliably.'
   ].join(' ');
 
-  const contextSection = context
-    ? [`Conversation context so far:\n${context.slice(0, 2000)}`]
+  const mergedContext = [sessionContext, context].filter(Boolean).join('\n\n---\n\n');
+  const contextSection = mergedContext
+    ? [`Conversation context so far:\n${mergedContext.slice(0, 2000)}`]
     : [];
 
   const buildPromptSection = [
@@ -606,7 +694,17 @@ async function callBuilderModel({ prompt, tone, builder, attachments, context = 
     input: [
       {
         role: 'system',
-        content: [{ type: 'input_text', text: systemPrompt }]
+        content: [
+          { type: 'input_text', text: systemPrompt },
+          { type: 'input_text', text: toneGuidance.system },
+          { type: 'input_text', text: builderGuidance.systemPrompt },
+          builderKnowledge
+            ? { type: 'input_text', text: `Builder knowledge base:\n${builderKnowledge}` }
+            : null,
+          builderTips
+            ? { type: 'input_text', text: `Builder execution tips:\n• ${builderTips}` }
+            : null
+        ]
       },
       {
         role: 'user',
@@ -678,12 +776,15 @@ function simulateAdvisorResponse({ prompt, tone, builder, attachments }) {
   const builderActions = [
     {
       title: `Implement inside ${builderGuidance.label}`,
-      detail: toneGuidance.rewrite(builderGuidance.tip)
+      detail: toneGuidance.rewrite(
+        builderGuidance.tips?.[0] ||
+          'Apply the adjustments in your builder using the guidance above, focusing on hierarchy, spacing, and CTA styling.'
+      )
     }
   ];
 
   return {
-    mode: tone,
+    mode: 'advisor',
     builder,
     frictionScore,
     frictionLabel: scoreLabel(frictionScore),
@@ -694,6 +795,10 @@ function simulateAdvisorResponse({ prompt, tone, builder, attachments }) {
     summary: `${visualNote}Estimated client friction: ${scoreLabel(frictionScore)}.`,
     suggestions,
     builderActions,
+    experiments: [toneGuidance.rewrite('Run a before/after user test focused on the hero and pricing sections to confirm the improvements.')],
+    checklist: [toneGuidance.rewrite('Double-check mobile spacing, CTA contrast, and add proof directly under the hero block.')],
+    followup_questions: [],
+    needs_followup: false,
     reassurance: toneGuidance.rewrite(
       'You can ask for more detail on any step, or let AI Sales draft the screens when you are ready.'
     ),
@@ -758,7 +863,9 @@ function simulateBuilderPlan({ prompt, builder }) {
     builderSteps: [
       {
         title: `Configure layout in ${builderGuidance.label}`,
-        detail: builderGuidance.tip
+        detail:
+          builderGuidance.tips?.[0] ||
+          'Adjust layout spacing, typography tokens, and CTA styling using the guidance above.'
       },
       {
         title: 'Apply styling system',
@@ -836,7 +943,7 @@ function normalizeLLMResponse(payload, { tone, builder }) {
   const builderActions = Array.isArray(parsed?.builder_actions) && parsed.builder_actions.length > 0 ? parsed.builder_actions : findings;
 
   return {
-    mode: tone,
+    mode: parsed?.mode || tone,
     builder,
     raw: parsed,
     headline: parsed?.headline || findings?.[0]?.title || 'Here is what I noticed:',
@@ -844,14 +951,20 @@ function normalizeLLMResponse(payload, { tone, builder }) {
     frictionScore: frictionNumeric,
     frictionLabel,
     frictionRationale,
-    suggestions: findings.map((item, idx) => ({
+    suggestions: (parsed?.findings || findings).map((item, idx) => ({
       title: item.title || `Insight ${idx + 1}`,
-      detail: item.detail || (typeof item === 'string' ? item : JSON.stringify(item))
+      detail: item.detail || (typeof item === 'string' ? item : JSON.stringify(item)),
+      impact: item.impact || undefined
     })),
-    builderActions: builderActions.map((item, idx) => ({
+    builderActions: (parsed?.builder_actions || builderActions).map((item, idx) => ({
       title: item.title || `Builder step ${idx + 1}`,
-      detail: item.detail || (typeof item === 'string' ? item : JSON.stringify(item))
+      detail: item.detail || (typeof item === 'string' ? item : JSON.stringify(item)),
+      estimate: item.estimate || undefined
     })),
+    experiments: parsed?.experiments || [],
+    checklist: parsed?.checklist || [],
+    followupQuestions: parsed?.followup_questions || [],
+    needsFollowup: Boolean(parsed?.needs_followup),
     reassurance: parsed?.reassurance || frictionRationale,
     suggestedPrompts: parsed?.suggested_prompts || []
   };
@@ -933,7 +1046,7 @@ function buildSmallTalkAdvisorResponse({ prompt = '', tone, builder }) {
       {
         title: toneGuidance.rewrite(`Prep for ${builderGuidance.label}`),
         detail: toneGuidance.rewrite(
-          `Jot down what feels clunky today, then share the screen or flow. I’ll translate improvements into ${builderGuidance.label} steps like: ${builderGuidance.tip}`
+          `Jot down what feels clunky today, then share the screen or flow. I’ll translate improvements into ${builderGuidance.label} steps like: ${builderGuidance.tips?.[0] || 'adjusting the hero block, CTA, and proof sections aligned with the knowledge base above.'}`
         )
       }
     ],
@@ -977,66 +1090,159 @@ function getToneGuidance(tone) {
 }
 
 function getBuilderGuidance(builder) {
-  const guides = {
+  const cards = {
     'No builder': {
       label: 'No builder specified',
-      system:
-        'When users do not specify a builder, keep implementation guidance technology-agnostic and focus on general UX/UI patterns.',
-      tip: 'Apply the suggested hierarchy, spacing, and copy changes directly in your design or codebase; ensure your primary CTA uses a white background, bold black text, and has trust signals nearby.'
+      systemPrompt: [
+        'The user has not specified a builder. Keep implementation guidance technology-agnostic and focus on UX/UI patterns that can be applied to any stack.',
+        'Offer HTML/CSS or product strategy actions when helpful.'
+      ].join(' '),
+      knowledge: [
+        'Works across any custom stack, design tool, or slide deck.',
+        'Emphasize visual hierarchy, copy clarity, trust builders, and friction removal.',
+        'Surface metrics to watch (bounce, conversion, time on task) when proposing experiments.'
+      ],
+      tips: [
+        'Call out sections to tighten (hero, navigation, pricing) and describe the exact copy/layout change.',
+        'Suggest instrumentation or quick experiments the user can run to validate the change.'
+      ]
     },
     Bubble: {
-      label: 'Bubble builder',
-      system:
-        'When users mention Bubble, map steps to Bubble editor workflows and reference responsive engine updates.',
-      tip: 'Open the hero group, enable Responsive Engine gap of 24px, update the heading text, and align the primary button style to the brand color.'
+      label: 'Bubble',
+      systemPrompt:
+        'Reference Bubble Editor concepts: groups, responsive containers, data sources, workflows, and styles. Suggest changes in the exact panels users interact with.',
+      knowledge: [
+        'Responsive engine controls live under the Layout tab (row/column, gap, min width).',
+        'Reusable elements and styles drive consistency; highlight which style to adjust.',
+        'Workflow triggers run from buttons and inputs; call out where to add success messaging or tracking.'
+      ],
+      tips: [
+        'Bubble → open the target group, adjust min width and gap to declutter.',
+        'Update the Style for primary buttons and ensure states are used for hover/disabled.',
+        'Add an analytics workflow step (e.g., Amplitude plugin) when the CTA fires.'
+      ]
     },
     Base44: {
       label: 'Base44',
-      system:
-        'Reference Base44’s block-based editor, canvas layout, and exportable components when guiding implementation.',
-      tip: 'Open the target canvas, swap in the refined hero block copy, update the primary action color to #4E5CF0, and add a proof section beneath the hero using Base44 blocks.'
+      systemPrompt:
+        'Reference Base44’s block library, layout canvas, and exportable components. Highlight changes in terms of swapping blocks, editing typography tokens, and publishing exports.',
+      knowledge: [
+        'Blocks snap to the Base44 grid; spacing tokens (S, M, L) govern rhythm.',
+        'Typography tokens (Display, Heading, Body) should be reused for consistent hierarchy.',
+        'Export packages include HTML/CSS; note when a change impacts the exported bundle.'
+      ],
+      tips: [
+        'In Base44 Canvas, replace the Hero block with “Hero · Clarity” and update Heading/Subheading tokens.',
+        'Adjust CTA button token to “Action / Primary Inverse” for high contrast.',
+        'Add a “Logos · Proof Row” block below hero to validate the offer.'
+      ]
     },
     Webflow: {
       label: 'Webflow',
-      system: 'Reference Webflow designer panels, style classes, and publish workflow.',
-      tip: 'Edit the hero wrapper class, adjust the max-width to 640px, and update the CTA button class with padding 16px × 32px and radius 14px before you publish.'
+      systemPrompt:
+        'Reference Webflow designer: classes, style panel, interactions, CMS collections, and publish workflow. Suggest exact class or element names when giving steps.',
+      knowledge: [
+        'Global classes (e.g., .container, .button) should be reused; propose new combo classes sparingly.',
+        'Flex and grid controls live in the Layout panel; margin/padding adjustments keep boxes aligned.',
+        'CMS collections power dynamic content—mention when to add fields or sort filters.'
+      ],
+      tips: [
+        'Select `.hero-wrapper`, set max-width 680px, center with auto margins, and add gap 32px.',
+        'Update `.button-primary` to use white background, black text, radius 14px.',
+        'Add a CMS-powered testimonial slider beneath the hero using Collection Lists.'
+      ]
     },
     Glide: {
       label: 'Glide',
-      system: 'Provide guidance referencing Glide layout editor and theme settings.',
-      tip: 'Change the inline list order so testimonials sit above pricing, and adjust the accent color under Theme → Brand to match the new call-to-action styling.'
+      systemPrompt:
+        'Reference Glide app builder: tabs, layout editor, component list, Theme > Brand settings, and data tables.',
+      knowledge: [
+        'Each tab maps to a data table; highlight when to restructure tables for clarity.',
+        'Component list order defines hierarchy; drag components to prioritize proof before pricing.',
+        'Theme settings control accent colors and typography globally.'
+      ],
+      tips: [
+        'Glide → Home tab: move testimonials component above pricing, update rich text copy with a crisp promise.',
+        'In Theme → Brand, set accent color to #111111 for buttons, with white text.',
+        'Add a progress bar component to guide users through onboarding steps.'
+      ]
     },
     Retool: {
       label: 'Retool',
-      system:
-        'Reference Retool component tree and the way workflows are configured for internal tools.',
-      tip: 'Open the form container, adjust label typography to 14px SemiBold, add helper text for each input, and ensure the submit action posts analytics events.'
+      systemPrompt:
+        'Reference Retool’s component tree, state management, transformers, and event handlers. Tailor suggestions to internal tool UX.',
+      knowledge: [
+        'Retool forms rely on JSON data; highlight where to enforce validation and helper text.',
+        'Query editor wires to APIs/DB; mention logging or success toast best practices.',
+        'App layout uses containers; instruct on alignment, spacing, and filter defaults.'
+      ],
+      tips: [
+        'Retool → Adjust Form component: set label casing to Title Case, add placeholder examples.',
+        'Add a Success toast in the submit event handler with clear next steps.',
+        'Use a Tabs container to separate “Overview” vs “Advanced filters” to reduce clutter.'
+      ]
     },
     Softr: {
       label: 'Softr',
-      system: 'Reference Softr blocks and the simple publish workflow.',
-      tip: 'Switch the hero block to “Modern Hero”, update the copy, and add a trusted-by logos block directly under the hero using the library.'
+      systemPrompt:
+        'Reference Softr block library, global styles, and publishing. Suggest swapping blocks and adjusting content in the editor.',
+      knowledge: [
+        'Blocks snap to sections; swapping block presets is faster than manual styling.',
+        'Global Styles control typography/colors across blocks—mention when to tweak them.',
+        'Integrations (Airtable, HubSpot) often power dynamic sections—note connection points.'
+      ],
+      tips: [
+        'Swap hero block to “Hero · Impact,” update heading/subheading, keep CTA high contrast.',
+        'Insert “Logos · Trusted by” block below hero for social proof.',
+        'Use a two-column block for pricing vs. FAQs to answer objections inline.'
+      ]
     },
     FlutterFlow: {
       label: 'FlutterFlow',
-      system: 'Tie instructions to FlutterFlow page editor and Theme overrides.',
-      tip: 'Edit the Landing Screen, update the AppBar text, tweak the primary button style under Theme, and move the KPI cards above the fold.'
+      systemPrompt:
+        'Reference FlutterFlow page editor, Theme overrides, Actions, and Firebase bindings. Tailor guidance to responsive layout and cross-platform output.',
+      knowledge: [
+        'Widget tree defines layout; propose reordering widgets for above-the-fold clarity.',
+        'Theme controls button styles; note when to create a custom theme style.',
+        'Actions define backend calls; mention validation, success states, and navigation flows.'
+      ],
+      tips: [
+        'FlutterFlow → Landing Screen: edit AppBar text for clarity, move Summary cards above testimonials.',
+        'In Theme → Buttons, create a “Primary Inverse” style (white background, black text) and apply to main CTA.',
+        'Add a confirmation snackbar action after form submission with next steps.'
+      ]
     },
     Adalo: {
       label: 'Adalo',
-      system: 'Reference screens, components, and global styles in Adalo.',
-      tip: 'Open the Landing Screen, update the headline, adjust the button style to “Primary Solid”, and add a simple social proof list below it.'
+      systemPrompt:
+        'Reference Adalo screens, lists, modal actions, and styles. Focus on mobile-first adjustments.',
+      knowledge: [
+        'Adalo lists derive from collections; mention when to sort/filter or add relationships.',
+        'Styles panel adjusts button edges, shadows, and typography globally.',
+        'Modals and actions handle flows; suggest conditional visibility or validation.'
+      ],
+      tips: [
+        'Open Landing screen, update hero headline, increase button border radius to 12px, and add a list of testimonials below.',
+        'Use a modal to collect lead info with minimal fields, display confirmation message afterward.'
+      ]
     }
   };
 
-  return (
-    guides[builder] || {
-      label: builder,
-      system:
-        'Provide general implementation guidance without assuming a specific builder. Offer HTML/CSS actions if useful.',
-      tip: 'Replicate these steps in your builder’s hero section, button styles, and trust indicators.'
-    }
-  );
+  const fallback = {
+    label: builder,
+    systemPrompt:
+      'Provide implementation guidance even if the builder is unknown. Offer HTML/CSS patterns, UX frameworks, and instrumentation tips.',
+    knowledge: [
+      'Focus on clarity of promise, hierarchy, social proof, and friction removal.',
+      'Suggest copy edits, layout adjustments, and simple experiments to validate impact.'
+    ],
+    tips: [
+      'Call out the highest-impact sections (hero, navigation, pricing) and describe precise fixes.',
+      'Encourage adding trust indicators (logos, testimonials, guarantees).'
+    ]
+  };
+
+  return cards[builder] || fallback;
 }
 
 function extractScore(text) {
@@ -1143,6 +1349,37 @@ function safeJsonParse(value) {
   } catch (_error) {
     return null;
   }
+}
+
+const SESSION_HISTORY_LIMIT = 12;
+
+function appendSessionHistory(session, entry = {}) {
+  if (!session) return;
+  if (!Array.isArray(session.history)) session.history = [];
+  session.history.push({ ...entry, timestamp: Date.now() });
+  if (session.history.length > SESSION_HISTORY_LIMIT) {
+    session.history.splice(0, session.history.length - SESSION_HISTORY_LIMIT);
+  }
+}
+
+function buildSessionHistoryContext(history = []) {
+  if (!Array.isArray(history) || history.length === 0) return '';
+  const sliceStart = Math.max(0, history.length - SESSION_HISTORY_LIMIT);
+  const lines = [];
+  history.slice(sliceStart).forEach((entry) => {
+    if (!entry) return;
+    const roleLabel = entry.role === 'ai' ? 'AI Sales' : 'User';
+    const channel = entry.channel ? `·${entry.channel}` : '';
+    const builder = entry.builder ? `·${entry.builder}` : '';
+
+    if (entry.prompt) {
+      lines.push(`${roleLabel}${channel}${builder}: ${entry.prompt}`);
+    } else if (entry.summary) {
+      lines.push(`${roleLabel}${channel}${builder}: ${entry.summary}`);
+    }
+  });
+
+  return lines.join('\n');
 }
 
 async function handleStripeWebhook(event) {
