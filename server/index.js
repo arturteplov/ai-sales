@@ -220,8 +220,9 @@ app.post('/api/payments/checkout', async (req, res) => {
   }
 
   try {
+    const mode = process.env.STRIPE_MODE || 'payment';
     const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
+      mode,
       customer_email: email || undefined,
       line_items: [
         {

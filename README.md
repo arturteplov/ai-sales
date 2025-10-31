@@ -29,6 +29,7 @@ OPENAI_MODEL=gpt-4o-2024-08-06              # optional override
 STRIPE_SECRET_KEY=sk_live_...               # required for live payments
 STRIPE_PRICE_ID=price_123                   # required when Stripe is enabled
 STRIPE_WEBHOOK_SECRET=whsec_...             # verify Checkout webhooks
+STRIPE_MODE=payment                         # 'payment' (one-time) or 'subscription'; defaults to payment
 CHECKOUT_SUCCESS_URL=https://ai-trust.onrender.com/success
 CHECKOUT_CANCEL_URL=https://ai-trust.onrender.com/cancel
 TRIAL_DAYS=0                                # optional Stripe trial length
@@ -47,7 +48,7 @@ FREE_BUILD_LIMIT=1                          # free “build” allowance before 
 ## Payment flow
 
 1. User clicks **Generate full build plan ($7/mo)**.  
-2. `/api/payments/checkout` creates a Stripe Checkout session (subscription mode).  
+2. `/api/payments/checkout` creates a Stripe Checkout session (`STRIPE_MODE` controls one-time vs subscription).  
 3. Stripe redirects back to `/success`; the page immediately fetches `/api/reports/download`.  
 4. The server looks up the last confidence score, selects the closest PDF, and streams it.
 
