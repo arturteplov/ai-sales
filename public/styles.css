@@ -313,17 +313,10 @@ pre {
   border-radius: 24px;
   padding: 32px;
   overflow: hidden;
-  transition: border-color 0.2s ease;
 }
 
 .locked-overlay {
-  position: absolute;
-  inset: 0;
-  backdrop-filter: blur(12px);
-  background: rgba(0, 0, 0, 0.6);
-  opacity: 1;
-  transition: opacity 0.2s ease;
-  pointer-events: auto;
+  display: none;
 }
 
 .locked-content {
@@ -331,23 +324,6 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  filter: blur(1.5px);
-  pointer-events: none;
-  transition: filter 0.2s ease;
-}
-
-.locked-block:hover {
-  border-color: rgba(255, 255, 255, 0.35);
-}
-
-.locked-block:hover .locked-overlay {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.locked-block:hover .locked-content {
-  filter: none;
-  pointer-events: auto;
 }
 
 .locked-content .primary-button {
