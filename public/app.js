@@ -31,7 +31,7 @@ function heroMarkup() {
   return `
     <header class="hero">
       <h1>AI Trust checks if your experience builds confidence or triggers red flags.</h1>
-      <p>Upload your key screens and I’ll hand back a scorecard with the riskiest friction, a rewritten headline, and a CSS tweak you can ship today.</p>
+      <p>Upload your key screens and I’ll hand back a scorecard with the riskiest friction, a rewritten headline, and a tweak you can ship today.</p>
     </header>
   `;
 }
@@ -42,7 +42,7 @@ function intakeMarkup() {
     <section class="intake" aria-label="Upload flow">
       <ol class="stepper">
         <li class="${hasFiles ? 'complete' : 'active'}">Upload</li>
-        <li class="${state.isAnalyzing ? 'active' : state.analysis ? 'complete' : ''}">Analyze the screenshots (free)</li>
+        <li class="${state.isAnalyzing ? 'active' : state.analysis ? 'complete' : ''}">Analysis</li>
         <li class="${state.analysis ? 'complete' : ''}">Fixes</li>
       </ol>
       <div class="ellipse-shell drop-zone" data-role="dropzone">
@@ -55,7 +55,7 @@ function intakeMarkup() {
         <button type="button" class="example-chip" data-action="open-example">See an example</button>
         <button type="button" class="primary-button" id="analyze-btn" ${hasFiles && !state.isAnalyzing ? '' : 'disabled'}>${state.isAnalyzing ? 'Analyzing…' : 'Analyze'}</button>
       </div>
-      <p class="privacy-note">Screenshots analyzed once, not stored. Local OCR by default; AI analysis only if you opt in.</p>
+      <p class="privacy-note">Screenshots analyzed once, not stored.</p>
     </section>
   `;
 }
