@@ -1213,6 +1213,14 @@ function randomBetween(rng, min, max) {
   return Math.round(rng() * (max - min) + min);
 }
 
+function clampScore(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  if (num < 0) return 0;
+  if (num > 100) return 100;
+  return Math.round(num);
+}
+
 function mulberry32(a) {
   return function () {
     a |= 0;
