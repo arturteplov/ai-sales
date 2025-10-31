@@ -149,7 +149,7 @@ function lockedOverlay(locked = [], isCheckingOut = false) {
         </ul>
         <div class="locked-actions">
           <button type="button" class="primary-button" data-action="start-checkout">
-            ${isCheckingOut ? 'Redirecting…' : 'Generate full build plan ($7/mo)'}
+            ${isCheckingOut ? 'Redirecting…' : 'Generate full build plan ($1)'}
           </button>
           <button type="button" class="secondary-button" data-action="start-test-checkout">
             Test pay (dev)
