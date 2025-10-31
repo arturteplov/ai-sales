@@ -337,7 +337,74 @@ async function fileToBase64(filePath) {
 }
 
 async function callAdvisorModel({ tone, builder }) {
-  return generateScorecardVariant({ tone, builder });
+  try {
+    return generateScorecardVariant({ tone, builder });
+  } catch (error) {
+    console.error('Scorecard generator error, returning fallback variant:', error);
+    return buildSafeFallback({ tone, builder });
+  }
+}
+
+function buildSafeFallback({ tone, builder }) {
+  const guidance = getBuilderGuidance(builder);
+  const label = friendlyBuilderName(guidance);
+  return {
+    builder,
+    tone,
+    scores: {
+      confidence: 58,
+      pushiness: 54,
+      clarity: 56
+    },
+    flags: [
+      {
+        title: 'Proof shows up late',
+        detail: `Prospects in ${label} see credentials only after scrolling.`,
+        evidence: `Move one customer quote or metric above the fold in ${label}.`
+      },
+      {
+        title: 'CTA lacks clarity',
+        detail: 'The primary action does not spell out what happens next.',
+        evidence: `Rewrite the CTA to describe the outcome (“View the trust scorecard”) in ${label}.`
+      },
+      {
+        title: 'Spacing feels uneven',
+        detail: 'Sections bunch together, making the promise hard to scan.',
+        evidence: `Add consistent 24px spacing blocks between sections in ${label}.`
+      }
+    ],
+    freeRewrite: {
+      before: 'Build faster with our platform.',
+      after: `Upload your latest flow and AI Trust will hand back the exact fix to ship in ${label}.`,
+      rationale: 'Spells out the process and ties it to the builder.'
+    },
+    lockedInsights: [
+      { title: 'Trust signal roadmap', summary: 'Shows where to insert proof, guarantees, and social validation.' },
+      { title: 'Conversion experiment kit', summary: 'Three quick tests to validate the revised flow.' },
+      { title: 'Activation rescue plan', summary: 'Guidance for onboarding and empty states after the first click.' }
+    ],
+    builderActions: [
+      {
+        title: `Polish the hero section`,
+        detail: `In ${label}, tighten the hero headline, add one proof row, and ensure the CTA contrasts strongly.`
+      },
+      {
+        title: `Clarify the pricing grid`,
+        detail: `Highlight the recommended option and add a reassurance line near the CTA inside ${label}.`
+      }
+    ],
+    experiments: [
+      `Run a five-user interview to hear how they describe the offer back after seeing the new ${label} hero.`,
+      `A/B test the rewritten CTA versus current copy and compare clicks in ${label}.`,
+      'Track signup conversion after adding a “What happens next” strip.'
+    ],
+    checklist: [
+      'Ensure testimonials display full names, roles, and company logos.',
+      'Add a short reassurance line near any pricing or signup ask.',
+      'Confirm hero CTA maintains ≥3:1 contrast against its background.'
+    ],
+    metadata: { fallback: true }
+  };
 }
 
 async function callBuilderModel({ prompt, tone, builder, attachments, context = '', sessionContext = '' }) {
