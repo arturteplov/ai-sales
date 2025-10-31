@@ -7,7 +7,7 @@ AI Trust lets teams drop in the latest product screenshots, see instant confiden
 - **Scorecard-first UX** – Users upload up to six PNG/JPG/PDF files and get a three-metric scorecard with tailored guidance, rewrites, experiments, and checklists.
 - **Builder-aware insights** – Extras reference the selected builder (Bubble, Webflow, Glide, etc.) so fixes feel native to each tool.
 - **Deterministic fallbacks** – If `OPENAI_API_KEY` is missing, the server still returns seeded variants so the UI stays shareable.
-- **Stripe upgrade flow** – `Generate full build plan ($7/mo)` launches a Stripe Checkout subscription. A dev-only “Test pay” button flags the session as subscribed without hitting Stripe.
+- **Stripe upgrade flow** – `Generate full build plan ($7/mo)` launches a Stripe Checkout payment session; on return, the success page streams the matched PDF automatically.
 - **PDF library routing** – Place `Confidence_Report_##.pdf` files in `reports/`; `/api/reports/download` finds the closest suffix to the user’s confidence score. A single `example_*.pdf` powers the “See an example” modal.
 
 ## Quickstart
@@ -80,4 +80,4 @@ tmp_uploads/     # Ephemeral uploads (gitignored)
 - Hook in analytics (PostHog / Amplitude) and live support.  
 - Reintroduce a chat or builder export once Phase 2 is scoped.
 
-Ship the repo as-is to early testers: upload screenshots, review the scorecard, press **Test pay (dev)** for an instant success flow, or connect real Stripe keys when you’re ready to charge.
+Ship the repo as-is to early testers: upload screenshots, review the scorecard, click **Generate full build plan** to test Stripe’s flow, or wire live keys when you’re ready to charge.
