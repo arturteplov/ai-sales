@@ -131,7 +131,7 @@ function lockedOverlay(locked = [], isCheckingOut = false) {
     <aside class="locked-block">
       <div class="locked-overlay"></div>
       <div class="locked-content">
-        <h3>Unlock the full build plan</h3>
+        <h3>You can unlock the full build plan</h3>
         <ul class="locked-list">
           ${locked
             .map(
@@ -149,7 +149,7 @@ function lockedOverlay(locked = [], isCheckingOut = false) {
         </ul>
         <div class="locked-actions">
           <button type="button" class="primary-button" data-action="start-checkout">
-            ${isCheckingOut ? 'Redirecting…' : 'Generate full build plan ($1)'}
+            ${isCheckingOut ? 'Redirecting…' : 'Generate full build plan ($7)'}
           </button>
           <button type="button" class="secondary-button" data-action="start-test-checkout">
             Test pay (dev)
