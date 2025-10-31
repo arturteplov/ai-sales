@@ -1264,7 +1264,12 @@ function buildChecklist(guidance, rng) {
 function pickLibraryReportForScore(score) {
   try {
     const entries = fs.readdirSync(REPORT_LIBRARY_DIR, { withFileTypes: true });
-    const pdfs = entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.pdf'));
+    const pdfs = entries.filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.toLowerCase().endsWith('.pdf') &&
+        !entry.name.toLowerCase().startsWith('example_')
+    );
     if (!pdfs.length) return null;
 
     const ranges = { low: [], mid: [], high: [] };
@@ -1274,6 +1279,7 @@ function pickLibraryReportForScore(score) {
       const { suffix, category } = details;
       ranges[category].push({ name: entry.name, suffix });
     });
+    console.log('[reports] available library files', ranges);
 
     const bucket = selectBucket(score, ranges);
     if (!bucket || !bucket.length) return null;
@@ -1289,22 +1295,37 @@ function pickLibraryReportForScore(score) {
 function selectBucket(score, ranges) {
   const numericScore = typeof score === 'string' ? Number(score) : score;
   if (!Number.isFinite(numericScore)) {
-    return ranges.mid.length ? ranges.mid : ranges.low.length ? ranges.low : ranges.high;
+    return chooseFirstAvailable(ranges, ['mid', 'low', 'high']);
   }
   if (numericScore < 60) {
-    return ranges.low.length ? ranges.low : fallbackBuckets(ranges, ['mid', 'high', 'low']);
+    return ranges.low.length ? ranges.low : chooseClosestBySuffix(ranges, numericScore);
   }
   if (numericScore < 90) {
-    return ranges.mid.length ? ranges.mid : fallbackBuckets(ranges, ['high', 'low', 'mid']);
+    return ranges.mid.length ? ranges.mid : chooseClosestBySuffix(ranges, numericScore);
   }
-  return ranges.high.length ? ranges.high : fallbackBuckets(ranges, ['mid', 'low', 'high']);
+  return ranges.high.length ? ranges.high : chooseClosestBySuffix(ranges, numericScore);
 }
 
-function fallbackBuckets(ranges, order) {
+function chooseFirstAvailable(ranges, order) {
   for (const key of order) {
     if (ranges[key] && ranges[key].length) return ranges[key];
   }
   return null;
+}
+
+function chooseClosestBySuffix(ranges, score) {
+  const combined = [...ranges.low, ...ranges.mid, ...ranges.high];
+  if (!combined.length) return null;
+  let closest = combined[0];
+  let bestDiff = Math.abs(closest.suffix - score);
+  for (let i = 1; i < combined.length; i += 1) {
+    const diff = Math.abs(combined[i].suffix - score);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      closest = combined[i];
+    }
+  }
+  return [closest];
 }
 
 function getExampleReport() {
