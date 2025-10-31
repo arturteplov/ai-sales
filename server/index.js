@@ -285,7 +285,7 @@ app.get('/api/reports/download', (req, res) => {
   if (!session.isSubscribed) {
     return res.status(403).json({
       error: 'forbidden',
-      message: 'An active subscription is required to download the full build plan.'
+      message: 'A 1-time activation is required to download the full build plan.'
     });
   }
 
