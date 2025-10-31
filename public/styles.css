@@ -1,12 +1,12 @@
 :root {
   color-scheme: dark;
-  --bg: #050505;
-  --card: rgba(255, 255, 255, 0.04);
-  --border: rgba(255, 255, 255, 0.08);
+  --bg: #010101;
+  --text-primary: #f7f7f7;
+  --text-secondary: rgba(255, 255, 255, 0.64);
+  --border: rgba(255, 255, 255, 0.12);
   --accent: #ffffff;
-  --text-primary: #f5f5f5;
-  --text-secondary: rgba(255, 255, 255, 0.66);
-  --focus-ring: rgba(255, 255, 255, 0.45);
+  --card: rgba(255, 255, 255, 0.05);
+  --focus: rgba(255, 255, 255, 0.55);
 }
 
 * {
@@ -15,8 +15,8 @@
 
 body {
   margin: 0;
+  background: var(--bg);
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: radial-gradient(120% 120% at 50% 0%, rgba(255, 255, 255, 0.08), transparent) var(--bg);
   color: var(--text-primary);
 }
 
@@ -25,104 +25,114 @@ button {
 }
 
 .app-shell {
-  max-width: 1024px;
+  max-width: 1080px;
   margin: 0 auto;
   padding: 72px 32px 120px;
   display: flex;
   flex-direction: column;
-  gap: 48px;
+  gap: 56px;
 }
 
-.hero-copy h1 {
-  font-size: clamp(48px, 7vw, 64px);
+.hero h1 {
+  margin: 0 0 16px;
+  font-size: clamp(50px, 6vw, 62px);
   font-weight: 700;
-  margin: 0 0 12px;
 }
 
-.hero-subtitle {
+.hero p {
+  margin: 0;
   font-size: 18px;
-  line-height: 1.6;
   color: var(--text-secondary);
-  max-width: 640px;
+  max-width: 620px;
+  line-height: 1.6;
 }
 
-.progress-hint {
+.stepper {
   list-style: none;
   display: flex;
   gap: 12px;
   padding: 0;
-  margin: 32px 0 24px;
-  font-size: 14px;
-  letter-spacing: 0.06em;
+  margin: 0 0 24px;
   text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
-.progress-hint li {
-  padding: 6px 14px;
+.stepper li {
+  padding: 6px 16px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.progress-hint li.active,
-.progress-hint li.complete {
-  color: var(--bg);
-  background: var(--accent);
-}
-
-.intake-card {
-  border-radius: 28px;
-  padding: 36px;
   border: 1px solid var(--border);
-  background: linear-gradient(145deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01));
-  min-height: 220px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.stepper li.active,
+.stepper li.complete {
+  background: var(--accent);
+  color: #050505;
+}
+
+.intake {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.ellipse-shell {
+  border-radius: 999px;
+  padding: 32px 48px;
+  background: radial-gradient(120% 120% at 50% 10%, rgba(255, 255, 255, 0.12), rgba(0, 0, 0, 0.88));
+  border: 1px solid rgba(255, 255, 255, 0.15);
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 24px;
+  min-height: 150px;
   transition: border-color 0.2s ease, background 0.2s ease;
 }
 
-.intake-card.dragover {
-  border-color: rgba(255, 255, 255, 0.35);
-  background: rgba(255, 255, 255, 0.08);
+.ellipse-shell.dragover {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: radial-gradient(120% 120% at 50% 10%, rgba(255, 255, 255, 0.2), rgba(0, 0, 0, 0.9));
 }
 
-.drop-inner {
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  align-items: center;
+.ellipse-shell .ghost-button {
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-primary);
+  padding: 16px 26px;
+  border-radius: 999px;
+  cursor: pointer;
+  min-height: 48px;
+  font-size: 16px;
 }
 
-.drop-hint {
+.ellipse-shell .placeholder {
+  flex: 1;
+  font-size: 16px;
   color: var(--text-secondary);
-  margin: 0;
 }
 
 .file-preview {
-  width: 100%;
-  max-width: 480px;
+  min-width: 200px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 12px;
-  text-align: left;
+  gap: 8px;
+  text-align: right;
 }
 
 .file-preview .empty {
+  margin: 0;
+  font-size: 14px;
   color: var(--text-secondary);
-  margin: 8px 0 0;
 }
 
 .file-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 14px;
-  color: var(--text-secondary);
   gap: 12px;
+  font-size: 14px;
 }
 
 .file-item button {
@@ -130,17 +140,14 @@ button {
   border: none;
   color: var(--accent);
   cursor: pointer;
-  font-size: 13px;
   padding: 4px 6px;
+  font-size: 13px;
 }
 
-.file-item button:focus-visible,
-.primary-button:focus-visible,
-.secondary-button:focus-visible,
-.example-chip:focus-visible,
-.locked-cta:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+.intake-actions {
+  display: flex;
+  gap: 16px;
+  align-items: center;
 }
 
 .primary-button {
@@ -153,8 +160,6 @@ button {
   font-weight: 600;
   cursor: pointer;
   min-height: 48px;
-  min-width: 160px;
-  transition: transform 0.2s ease;
 }
 
 .primary-button:disabled {
@@ -162,42 +167,21 @@ button {
   cursor: not-allowed;
 }
 
-.primary-button:not(:disabled):hover {
-  transform: translateY(-1px);
-}
-
-.secondary-button {
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.24);
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-  padding: 12px 24px;
-  font-size: 16px;
-  cursor: pointer;
-  min-height: 48px;
-}
-
 .example-chip {
   border: none;
-  background: rgba(255, 255, 255, 0.12);
-  color: var(--text-primary);
-  padding: 10px 18px;
   border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: var(--text-primary);
+  padding: 12px 22px;
+  font-size: 15px;
   cursor: pointer;
-  font-size: 14px;
-}
-
-.intake-actions {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin: 24px 0 16px;
+  min-height: 44px;
 }
 
 .privacy-note {
   color: var(--text-secondary);
   font-size: 14px;
-  margin: 0;
+  margin: 8px 0 0;
 }
 
 .analysis {
@@ -208,43 +192,44 @@ button {
 
 .scorecard {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
 }
 
 .score {
-  border-radius: 24px;
-  padding: 18px 20px;
-  background: var(--card);
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .score-label {
   text-transform: uppercase;
-  font-size: 12px;
   letter-spacing: 0.08em;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
 .score-value {
-  font-size: 36px;
+  font-size: 40px;
   font-weight: 700;
-  margin-top: 8px;
 }
 
 .score-bar {
   width: 100%;
   height: 6px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  margin-top: 12px;
+  background: rgba(255, 255, 255, 0.14);
   overflow: hidden;
 }
 
 .score-bar span {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, #6de4ff, #ffffff);
+  background: linear-gradient(90deg, #7be7ff, #ffffff);
 }
 
 .flags h2 {
@@ -259,10 +244,10 @@ button {
 }
 
 .flag-card {
-  border-radius: 20px;
-  padding: 20px;
-  background: var(--card);
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -280,70 +265,61 @@ button {
 }
 
 .fix-card {
-  background: var(--card);
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
   border-radius: 24px;
   padding: 24px;
-}
-
-.fix-card header {
-  font-size: 18px;
-  font-weight: 600;
-  margin-bottom: 16px;
-}
-
-.rewrite-block {
-  display: grid;
-  gap: 14px;
-}
-
-.rewrite-block .fix-label {
-  display: block;
-  text-transform: uppercase;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: var(--text-secondary);
-  margin-bottom: 4px;
-}
-
-.css-block {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.css-block code {
-  font-size: 13px;
+.rewrite-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.chip {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.selector {
+  font-size: 14px;
   color: var(--text-secondary);
 }
 
-.css-block pre {
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
+pre {
+  margin: 0;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
   padding: 12px;
-  overflow-x: auto;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .rationale {
-  margin-top: 12px;
   color: var(--text-secondary);
-  font-size: 14px;
+  margin: 0;
 }
 
 .locked-block {
   position: relative;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
   border-radius: 24px;
-  border: 1px dashed rgba(255, 255, 255, 0.18);
-  overflow: hidden;
   padding: 32px;
+  overflow: hidden;
 }
 
 .locked-overlay {
   position: absolute;
   inset: 0;
-  backdrop-filter: blur(10px);
-  background: rgba(5, 5, 5, 0.55);
+  backdrop-filter: blur(12px);
+  background: rgba(0, 0, 0, 0.6);
 }
 
 .locked-content {
@@ -359,12 +335,8 @@ button {
   color: var(--text-secondary);
 }
 
-.locked-cta {
-  align-self: flex-start;
-}
-
 .extras {
-  background: var(--card);
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
   border-radius: 24px;
   padding: 24px;
@@ -375,37 +347,42 @@ button {
 
 .extras ul {
   margin: 0;
-  padding-left: 18px;
+  padding-left: 20px;
   color: var(--text-secondary);
 }
 
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(5, 5, 5, 0.75);
+  background: rgba(3, 3, 3, 0.78);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40px 24px;
+  padding: 32px;
 }
 
 .modal {
-  background: #111;
+  background: rgba(10, 10, 10, 0.94);
+  border: 1px solid var(--border);
   border-radius: 24px;
   padding: 32px;
   max-width: 640px;
   width: 100%;
-  border: 1px solid var(--border);
-  position: relative;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
+.modal img {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+}
+
 .modal-close {
   position: absolute;
-  top: 12px;
-  right: 16px;
+  top: 16px;
+  right: 20px;
   background: none;
   border: none;
   color: var(--text-secondary);
@@ -413,21 +390,27 @@ button {
   cursor: pointer;
 }
 
-.modal img {
-  width: 100%;
-  border-radius: 12px;
-  border: 1px solid var(--border);
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 768px) {
   .app-shell {
     padding: 56px 20px 80px;
   }
 
-  .primary-button,
-  .secondary-button,
-  .example-chip {
-    width: 100%;
+  .ellipse-shell {
+    flex-direction: column;
+    align-items: stretch;
+    border-radius: 36px;
+    gap: 14px;
+  }
+
+  .ellipse-shell .placeholder,
+  .file-preview {
+    text-align: left;
   }
 
   .intake-actions {

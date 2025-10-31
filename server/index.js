@@ -76,43 +76,26 @@ app.get('/api/session', (req, res) => {
 });
 
 app.post('/api/analyze', upload.array('files'), async (req, res) => {
-  const { prompt = '', tone = 'low-tech', builder = 'Bubble', context = '' } = req.body || {};
+  const { tone = 'low-tech', builder = 'No builder' } = req.body || {};
   const files = req.files || [];
   const session = req.session || {};
 
-  if (!prompt.trim() && files.length === 0) {
+  if (files.length === 0) {
     cleanupFiles(files);
-    return res.status(400).json({ error: 'Please provide a description or at least one file.' });
+    return res.status(400).json({ error: 'Please upload at least one screenshot.' });
   }
 
   try {
     appendSessionHistory(session, {
       role: 'user',
       channel: 'analyze',
-      prompt,
+      prompt: '[screenshots uploaded]',
       builder,
       tone,
-      context,
       attachments: files.length
     });
 
-    const sessionContext = buildSessionHistoryContext(session.history || []);
-    const attachments = await Promise.all(
-      files.map(async (file) => ({
-        name: file.originalname,
-        base64: await fileToBase64(file.path),
-        mimeType: file.mimetype
-      }))
-    );
-
-    const response = await callAdvisorModel({
-      prompt,
-      tone,
-      builder,
-      attachments,
-      context,
-      sessionContext
-    });
+    const response = await callAdvisorModel({ tone, builder });
 
     cleanupFiles(files);
     appendSessionHistory(session, {
@@ -353,194 +336,8 @@ async function fileToBase64(filePath) {
   return data.toString('base64');
 }
 
-async function callAdvisorModel({ prompt, tone, builder, attachments, context = '', sessionContext = '' }) {
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (isSmallTalkPrompt(prompt, attachments)) {
-    return buildSmallTalkAdvisorResponse({ prompt, tone, builder });
-  }
-
-  if (!apiKey) {
-    return simulateAdvisorResponse({ prompt, tone, builder, attachments });
-  }
-
-  const toneGuidance = getToneGuidance(tone);
-  const builderGuidance = getBuilderGuidance(builder);
-  const builderKnowledge = builderGuidance.knowledge?.join(' ') || '';
-  const builderTips = builderGuidance.tips?.join('\n• ') || '';
-
-  const systemPrompt = [
-    'You are AI Trust — a senior product advisor and conversion-focused designer.',
-    'You review web app screenshots and descriptions to spot friction that scares buyers and highlight trust builders.',
-    'Always give direct, actionable steps.',
-    'You must not change recommendation depth between tone modes; only adjust wording style.',
-    'Tailor the final implementation tips to the user provided builder platform when available.',
-    'Return a scorecard with confidence, pushiness, and clarity (0–100), the top three flags with evidence, one free rewrite, one CSS tweak, and summarize three locked insights for the upgrade paywall.',
-    'Populate builder_actions, experiments, and checklist when they materially accelerate implementation.',
-    'Respond using the JSON schema provided so that the application can reliably render your feedback.'
-  ].join(' ');
-
-  const mergedContext = [sessionContext, context].filter(Boolean).join('\n\n---\n\n');
-
-  const contextSection = mergedContext
-    ? [`Conversation context so far:\n${mergedContext.slice(0, 2000)}`]
-    : [];
-
-  const primaryPromptSection = [
-    `User tone preference: ${tone} (${toneGuidance.label}).`,
-    `Preferred builder: ${builder}.`,
-    'User brief:',
-    prompt
-  ].join('\n');
-
-  const userContent = [
-    {
-      type: 'input_text',
-      text: [...contextSection, primaryPromptSection].filter(Boolean).join('\n\n')
-    },
-    ...attachments.map((file) => ({
-      type: 'input_image',
-      image_base64: file.base64
-    }))
-  ];
-
-  const responseFormat = {
-    type: 'json_schema',
-    name: 'ai_trust_scorecard',
-    schema: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['scores', 'flags', 'free_rewrite', 'free_css', 'locked_items'],
-      properties: {
-        scores: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['confidence', 'pushiness', 'clarity'],
-          properties: {
-            confidence: { type: 'integer', minimum: 0, maximum: 100 },
-            pushiness: { type: 'integer', minimum: 0, maximum: 100 },
-            clarity: { type: 'integer', minimum: 0, maximum: 100 }
-          }
-        },
-        flags: {
-          type: 'array',
-          minItems: 1,
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['title', 'detail', 'evidence'],
-            properties: {
-              title: { type: 'string' },
-              detail: { type: 'string' },
-              evidence: { type: 'string', description: 'Quote or description of the trigger.' }
-            }
-          }
-        },
-        free_rewrite: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['before', 'after'],
-          properties: {
-            before: { type: 'string' },
-            after: { type: 'string' },
-            rationale: { type: 'string' }
-          }
-        },
-        free_css: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['selector', 'change'],
-          properties: {
-            selector: { type: 'string' },
-            change: { type: 'string' },
-            rationale: { type: 'string' }
-          }
-        },
-        locked_items: {
-          type: 'array',
-          minItems: 1,
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['title', 'summary'],
-            properties: {
-              title: { type: 'string' },
-              summary: { type: 'string' }
-            }
-          }
-        },
-        metadata: {
-          type: 'object',
-          additionalProperties: true,
-          description: 'Optional supporting metadata (builder actions, experiments, etc.)'
-        }
-      }
-    }
-  };
-
-  const payload = {
-    model: process.env.OPENAI_MODEL || 'gpt-4o-2024-08-06',
-    input: [
-      {
-        role: 'system',
-        content: [
-          { type: 'input_text', text: systemPrompt },
-          { type: 'input_text', text: toneGuidance.system },
-          { type: 'input_text', text: builderGuidance.systemPrompt },
-          builderKnowledge
-            ? {
-                type: 'input_text',
-                text: `Builder knowledge base:\n${builderKnowledge}`
-              }
-            : null,
-          builderTips
-            ? {
-                type: 'input_text',
-                text: `Builder execution tips:\n• ${builderTips}`
-              }
-            : null
-        ]
-      },
-      {
-        role: 'user',
-        content: userContent
-      }
-    ],
-    text: {
-      format: responseFormat
-    }
-  };
-
-  try {
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`OpenAI error: ${response.status} ${text}`);
-    }
-
-    const result = await response.json();
-    const structured = extractStructuredPayload(result);
-    if (!structured) {
-      console.warn(
-        'Advisor response missing structured payload.',
-        JSON.stringify(result).slice(0, 2000)
-      );
-      throw new Error('Model did not return structured payload.');
-    }
-
-    return normalizeScorecardResponse(structured, { tone, builder });
-  } catch (error) {
-    console.error('Falling back to simulated advisor output:', error.message);
-    return simulateAdvisorResponse({ tone, builder });
-  }
+async function callAdvisorModel({ tone, builder }) {
+  return generateScorecardVariant({ tone, builder });
 }
 
 async function callBuilderModel({ prompt, tone, builder, attachments, context = '', sessionContext = '' }) {
@@ -861,7 +658,6 @@ function normalizeScorecardResponse(payload, { tone, builder }) {
   const scores = parsed.scores || {};
   const flags = Array.isArray(parsed.flags) ? parsed.flags : [];
   const freeRewrite = parsed.free_rewrite || {};
-  const freeCss = parsed.free_css || {};
   const lockedItems = Array.isArray(parsed.locked_items) ? parsed.locked_items : [];
   const metadata = parsed.metadata || {};
 
@@ -893,11 +689,6 @@ function normalizeScorecardResponse(payload, { tone, builder }) {
       after: freeRewrite.after || 'Rewrite unavailable.',
       rationale: freeRewrite.rationale || 'Refine your messaging for clarity and trust.'
     },
-    freeCss: {
-      selector: freeCss.selector || ':root',
-      change: freeCss.change || 'Adjust spacing and typography tokens for readability.',
-      rationale: freeCss.rationale || 'Improves scanability and reduces cognitive load.'
-    },
     lockedInsights: lockedItems.map((item) => ({
       title: item.title || 'Additional insight',
       summary: item.summary || 'Unlock the full plan to view this insight.'
@@ -908,99 +699,7 @@ function normalizeScorecardResponse(payload, { tone, builder }) {
     })),
     experiments,
     checklist,
-    metadata,
-    autoBuildHint: lockedItems.length > 0
-  };
-}
-
-function isSmallTalkPrompt(prompt = '', attachments = []) {
-  if (!prompt || attachments.length > 0) return false;
-  const text = prompt.trim().toLowerCase();
-  if (!text) return false;
-
-  if (text.length > 160) return false;
-
-  const engagementKeywords = [
-    'landing',
-    'pricing',
-    'signup',
-    'checkout',
-    'conversion',
-    'hero',
-    'button',
-    'flow',
-    'screen',
-    'ui',
-    'ux',
-    'user'
-  ];
-  if (engagementKeywords.some((kw) => text.includes(kw))) {
-    return false;
-  }
-
-  const smallTalkTriggers = [
-    'how is it going',
-    'how are you',
-    'what is up',
-    "what's up",
-    'hello',
-    'hi there',
-    'hey there',
-    'good morning',
-    'good evening',
-    'thanks',
-    'thank you',
-    'great job',
-    'awesome',
-    'cool'
-  ];
-
-  return smallTalkTriggers.some((phrase) => text.includes(phrase));
-}
-
-function buildSmallTalkAdvisorResponse({ prompt = '', tone, builder }) {
-  const toneGuidance = getToneGuidance(tone);
-  const builderGuidance = getBuilderGuidance(builder);
-  const promptSnippet = prompt.trim() ? `You said “${prompt.trim()}.” ` : '';
-
-  const headlineBase = 'Quick pulse check before we dive in.';
-  const summaryBase = `${promptSnippet}I’m here to audit your product experience. Share a flow, screenshots, or your current challenge and I’ll pinpoint what builds trust and what creates friction.`;
-
-  const insightDetail =
-    'Tell me about a screen, funnel, or mindset you want prospects to have. The richer the context, the sharper the recommendations.';
-
-  return {
-    headline: toneGuidance.rewrite(headlineBase),
-    summary: toneGuidance.rewrite(summaryBase),
-    friction_score: {
-      numeric: 3,
-      label: 'Moderate',
-      rationale: toneGuidance.rewrite(
-        'I have not evaluated a specific experience yet—once you share it, I will score the friction and explain why.'
-      )
-    },
-    findings: [
-      {
-        title: toneGuidance.rewrite('Point me at a specific moment.'),
-        detail: toneGuidance.rewrite(insightDetail)
-      }
-    ],
-    builder_actions: [
-      {
-        title: toneGuidance.rewrite(`Prep for ${builderGuidance.label}`),
-        detail: toneGuidance.rewrite(
-          `Jot down what feels clunky today, then share the screen or flow. I’ll translate improvements into ${builderGuidance.label} steps like: ${builderGuidance.tips?.[0] || 'adjusting the hero block, CTA, and proof sections aligned with the knowledge base above.'}`
-        )
-      }
-    ],
-    reassurance: toneGuidance.rewrite(
-      'Once you share the experience, I’ll respond immediately with a tailored teardown.'
-    ),
-    suggested_prompts: [
-      'Audit my onboarding screen flow.',
-      'Review the hero section copy.',
-      `Show me how to improve the pricing experience in ${builderGuidance.label === builder ? builder : 'my builder'}.`
-    ]
+    metadata
   };
 }
 
@@ -1325,6 +1024,272 @@ function buildSessionHistoryContext(history = []) {
   return lines.join('\n');
 }
 
+const SCORE_VARIANT_SEEDS = Array.from({ length: 100 }, (_, i) => i + 1);
+let scoreVariantCursor = 0;
+
+function generateScorecardVariant({ tone, builder }) {
+  const seed = SCORE_VARIANT_SEEDS[scoreVariantCursor];
+  scoreVariantCursor = (scoreVariantCursor + 1) % SCORE_VARIANT_SEEDS.length;
+  return buildVariantFromSeed(seed, { tone, builder });
+}
+
+function buildVariantFromSeed(seed, { tone, builder }) {
+  const rng = mulberry32(seed * 9973 + 17);
+  const scores = generateScores(rng);
+  const builderGuidance = getBuilderGuidance(builder);
+
+  const flags = pickFlags(scores, builderGuidance, rng);
+  const freeRewrite = pickRewrite(scores, builderGuidance, rng);
+  const lockedInsights = pickLockedInsights(builderGuidance, rng);
+  const builderActions = pickBuilderActions(builderGuidance, rng);
+  const experiments = pickFromList(EXPERIMENT_TEMPLATES, rng, 2);
+  const checklist = pickFromList(CHECKLIST_TEMPLATES, rng, 3);
+
+  return {
+    builder,
+    tone,
+    scores,
+    flags,
+    freeRewrite,
+    lockedInsights,
+    builderActions,
+    experiments,
+    checklist,
+    metadata: {}
+  };
+}
+
+function generateScores(rng) {
+  const base = randomBetween(rng, 35, 80);
+  const confidence = clampScore(base + randomBetween(rng, -5, 5));
+  const pushiness = clampScore(confidence + randomBetween(rng, -5, 5));
+  const clarity = clampScore(Math.round((confidence + pushiness) / 2) + randomBetween(rng, -4, 4));
+
+  const scores = { confidence, pushiness, clarity };
+  const values = Object.values(scores);
+  const maxDiff = Math.max(...values) - Math.min(...values);
+  if (maxDiff > 10) {
+    const average = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+    return {
+      confidence: clampScore(average + randomBetween(rng, -4, 4)),
+      pushiness: clampScore(average + randomBetween(rng, -4, 4)),
+      clarity: clampScore(average + randomBetween(rng, -4, 4))
+    };
+  }
+
+  return scores;
+}
+
+function pickFlags(scores, builderGuidance, rng) {
+  const candidates = FLAG_TEMPLATES.filter((template) => template.condition(scores));
+  const selected = [];
+
+  const pool = candidates.length ? candidates : FLAG_TEMPLATES;
+  const poolCopy = [...pool];
+  while (selected.length < 3 && poolCopy.length) {
+    const index = Math.floor(rng() * poolCopy.length);
+    selected.push(poolCopy.splice(index, 1)[0]);
+  }
+
+  return selected.map((template) => template.build(scores, builderGuidance));
+}
+
+function pickRewrite(scores, builderGuidance, rng) {
+  const candidates = REWRITE_TEMPLATES.filter((template) => template.condition(scores));
+  const template = (candidates.length ? candidates : REWRITE_TEMPLATES)[Math.floor(rng() * (candidates.length || REWRITE_TEMPLATES.length))];
+
+  return {
+    before: template.before(builderGuidance),
+    after: template.after(builderGuidance),
+    rationale: template.rationale
+  };
+}
+
+function pickLockedInsights(builderGuidance, rng) {
+  const entries = pickFromList(LOCKED_INSIGHT_TEMPLATES, rng, 3);
+  return entries.map((item) => ({
+    title: item.title(builderGuidance),
+    summary: item.summary(builderGuidance)
+  }));
+}
+
+function pickBuilderActions(builderGuidance, rng) {
+  const tips = Array.isArray(builderGuidance.tips) ? builderGuidance.tips : [];
+  if (!tips.length) return [];
+  const count = Math.min(2, tips.length);
+  const chosen = pickFromList(tips, rng, count);
+  return chosen.map((tip, idx) => ({
+    title: idx === 0 ? `Start in ${builderGuidance.label}` : 'Polish the experience',
+    detail: tip
+  }));
+}
+
+function pickFromList(list, rng, count) {
+  const copy = [...list];
+  const result = [];
+  while (result.length < count && copy.length) {
+    const index = Math.floor(rng() * copy.length);
+    result.push(copy.splice(index, 1)[0]);
+  }
+  return result;
+}
+
+function mulberry32(a) {
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function randomBetween(rng, min, max) {
+  return Math.round(rng() * (max - min) + min);
+}
+
+const FLAG_TEMPLATES = [
+  {
+    condition: (scores) => scores.confidence < 50,
+    build: (_scores, guidance) => ({
+      title: 'Confidence is shaky',
+      detail: 'The hero promise lacks proof or clarity so prospects hesitate to trust it.',
+      evidence: `Add logos or wins directly under the CTA in ${guidance.label}.`
+    })
+  },
+  {
+    condition: (scores) => scores.clarity < 48,
+    build: () => ({
+      title: 'Flow feels ambiguous',
+      detail: 'The first screen mixes multiple asks, creating analysis paralysis.',
+      evidence: 'Keep one primary CTA and place supporting links below the fold.'
+    })
+  },
+  {
+    condition: (scores) => scores.pushiness > 60,
+    build: () => ({
+      title: 'Pushiness overtakes trust',
+      detail: 'Scarcity language and aggressive CTAs raise skepticism instead of urgency.',
+      evidence: 'Soften the tone and add a brief “what happens after” explanation.'
+    })
+  },
+  {
+    condition: (scores) => Math.min(scores.confidence, scores.clarity) >= 55 && scores.pushiness <= 55,
+    build: () => ({
+      title: 'Great tone, thin proof',
+      detail: 'The narrative is pleasant but lacks a reason to believe.',
+      evidence: 'Introduce one quantified outcome or testimonial within the first viewport.'
+    })
+  },
+  {
+    condition: (scores) => scores.confidence <= scores.pushiness && scores.confidence <= scores.clarity,
+    build: () => ({
+      title: 'Trust gap at the top',
+      detail: 'Visitors are unsure why your product wins versus alternatives.',
+      evidence: 'Add a comparison micro-table or credibility marker near the hero CTA.'
+    })
+  },
+  {
+    condition: (scores) => scores.clarity <= scores.confidence && scores.clarity <= scores.pushiness,
+    build: () => ({
+      title: 'Messaging overload',
+      detail: 'Multiple headlines and buttons compete for attention, diluting intent.',
+      evidence: 'Collapse secondary CTAs into subtle text links and keep one bold action.'
+    })
+  },
+  {
+    condition: () => true,
+    build: () => ({
+      title: 'Visual hierarchy drifts',
+      detail: 'Spacing and contrast make it hard to scan the main outcome quickly.',
+      evidence: 'Increase vertical rhythm (24–32px gaps) and use one highlight color for CTAs.'
+    })
+  },
+  {
+    condition: (scores) => scores.pushiness < 45,
+    build: () => ({
+      title: 'CTA lacks urgency',
+      detail: 'A friendly tone is good but prospects need a reason to act now.',
+      evidence: 'Add a short line about what they gain in the first session or week.'
+    })
+  },
+  {
+    condition: (scores) => scores.confidence > 70,
+    build: () => ({
+      title: 'Great proof, missing next step',
+      detail: 'The offer feels credible, yet the path to value is still hidden.',
+      evidence: 'Include a simple “Step 1–2–3” ribbon directly beneath the fold.'
+    })
+  },
+  {
+    condition: (scores) => scores.pushiness >= 55 && scores.clarity >= 55,
+    build: () => ({
+      title: 'Tone balanced, polish layout',
+      detail: 'Copy is persuasive but visual rhythm makes scanning harder than it should be.',
+      evidence: 'Increase padding inside cards and ensure primary CTA has 3:1 contrast.'
+    })
+  }
+];
+
+const REWRITE_TEMPLATES = [
+  {
+    condition: (scores) => scores.confidence < 50,
+    before: () => 'Build your ideas faster with our platform.',
+    after: (guidance) => `Launch a ${guidance.label} demo that wins trust in under 48 hours.`,
+    rationale: 'Narrows the promise to an outcome and timeframe that feels believable.'
+  },
+  {
+    condition: (scores) => scores.clarity < 50,
+    before: () => 'We do everything you need for growth.',
+    after: (guidance) => `Give visitors a clear next step: preview, personalize, and publish in ${guidance.label}.`,
+    rationale: 'Clarifies the journey and makes the CTA more explicit.'
+  },
+  {
+    condition: () => true,
+    before: () => 'Join thousands of happy users today!',
+    after: (guidance) => `Trusted by teams shipping in ${guidance.label}: see if your flow builds confidence in minutes.`,
+    rationale: 'Adds proof language and specifies what happens after clicking.'
+  }
+];
+
+const LOCKED_INSIGHT_TEMPLATES = [
+  {
+    title: (guidance) => 'Full pricing teardown',
+    summary: (guidance) => `Shows where ${guidance.label} page loses trust and how to restructure tiers.`
+  },
+  {
+    title: () => 'Trust signal roadmap',
+    summary: () => 'Lists credibility anchors (logos, metrics, objections) to add by section.'
+  },
+  {
+    title: () => 'Conversion experiment kit',
+    summary: () => 'Outlines three experiments with metrics, setup, and sample copy.'
+  },
+  {
+    title: () => 'Hero visual recommendations',
+    summary: () => 'Suggests layouts and imagery to boost first-glance comprehension.'
+  },
+  {
+    title: () => 'Friction heatmap',
+    summary: () => 'Highlights the most confusing UI elements and how to stage them.'
+  }
+];
+
+const EXPERIMENT_TEMPLATES = [
+  'A/B test the hero CTA label with a promise-oriented variant.',
+  'Run a five-user interview to hear how they describe the offer back to you.',
+  'Measure click-through after adding proof badges near the CTA.',
+  'Try a two-step form to capture intent before asking for detailed info.'
+];
+
+const CHECKLIST_TEMPLATES = [
+  'Confirm hero CTA maintains 3:1 contrast against its background.',
+  'Ensure mobile spacing keeps sections scannable (min 24px blocks).',
+  'Add alt text to hero imagery to reinforce the promise.',
+  'Capitalize only the first word of headlines for readability.',
+  'Place a short reassurance line near any pricing or signup ask.'
+];
+
 function clampScore(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return 50;
@@ -1348,25 +1313,20 @@ function fallbackScorecard({ tone, builder }) {
         evidence: 'Headline and subheadline should focus on a single transformation and CTA.'
       },
       {
-        title: 'Weak proof',
-        detail: 'Above-the-fold experience lacks trust anchors like logos or testimonials.',
-        evidence: 'Add logos or customer quotes directly beneath the main CTA.'
+        title: 'Missing proof',
+        detail: 'Trust anchors are buried, forcing visitors to guess whether you deliver.',
+        evidence: 'Add quantified outcomes or testimonial snippets above the fold.'
       },
       {
-        title: 'CTA ambiguity',
-        detail: 'Button copy does not explain what happens after clicking.',
-        evidence: 'Clarify the outcome (e.g., “Start a 14-day Base44 trial”).'
+        title: 'CTA uncertainty',
+        detail: 'Button text does not explain what happens after clicking.',
+        evidence: 'Clarify the next step (e.g., “Start a 7-day guided trial”).'
       }
     ],
     freeRewrite: {
       before: 'All-in-one platform that does everything for everyone.',
-      after: 'Launch high-converting demos in Base44, tailored to B2B buyers in under 48 hours.',
-      rationale: 'Sharpens the promise and targets the primary audience outcome.'
-    },
-    freeCss: {
-      selector: '.hero-section .cta',
-      change: 'background: #ffffff; color: #0b0b0b; border-radius: 14px; padding: 16px 28px;',
-      rationale: 'Boosts button contrast and perceived clickability.'
+      after: `Launch high-converting demos in ${guidance.label} tailored to your buyers in under 48 hours.`,
+      rationale: 'Sharpen the promise to a specific audience and timeframe.'
     },
     lockedInsights: [
       {
@@ -1379,11 +1339,11 @@ function fallbackScorecard({ tone, builder }) {
       },
       {
         title: 'Conversion experiment kit',
-        summary: 'Outlines three A/B tests with metrics and setup guides tailored to your builder.'
+        summary: 'Outlines three experiments with metrics, setup, and sample copy.'
       }
     ],
     builderActions: tipList.slice(0, 2).map((tip, idx) => ({
-      title: idx === 0 ? `Start inside ${guidance.label}` : 'Polish with design tokens',
+      title: idx === 0 ? `Start in ${guidance.label}` : 'Polish with design tokens',
       detail: tip
     })),
     experiments: ['Run a before/after usability test focusing on first-click success.'],
@@ -1391,8 +1351,7 @@ function fallbackScorecard({ tone, builder }) {
     metadata: {}
   };
 }
-
-async function handleStripeWebhook(event) {
+function handleStripeWebhook(event) {
   const { type, data } = event;
   const object = data?.object || {};
 

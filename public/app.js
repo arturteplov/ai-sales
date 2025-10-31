@@ -4,128 +4,119 @@ const state = {
   files: [],
   analysis: null,
   isAnalyzing: false,
-  showExample: false
+  showExample: false,
+  tone: 'low-tech', // preserved for future use
+  builder: 'No builder'
 };
 
-renderApp();
+render();
 
-function renderApp() {
+function render() {
   root.innerHTML = `
     <div class="app-shell">
-      ${uploadSectionMarkup()}
-      ${state.analysis ? analysisSectionMarkup(state.analysis) : ''}
+      ${heroMarkup()}
+      ${intakeMarkup()}
+      ${state.analysis ? analysisMarkup(state.analysis) : ''}
     </div>
     ${state.showExample ? exampleModalMarkup() : ''}
   `;
 
-  bindUploadControls();
-  bindAnalyzeControls();
-  bindExampleControls();
+  bindIntakeEvents();
+  bindExampleEvents();
 }
 
-function uploadSectionMarkup() {
+function heroMarkup() {
+  return `
+    <header class="hero">
+      <h1>AI Trust checks if your experience builds confidence or triggers red flags.</h1>
+      <p>Upload your key screens and I’ll hand back a scorecard with the riskiest friction, a rewritten headline, and a CSS tweak you can ship today.</p>
+    </header>
+  `;
+}
+
+function intakeMarkup() {
   const hasFiles = state.files.length > 0;
   return `
-    <section class="intake">
-      <header class="hero-copy">
-        <h1>See if your experience builds confidence or triggers red flags.</h1>
-        <p class="hero-subtitle">I review your screens and return a scorecard with the top risks, one rewired hero rewrite, and a CSS tweak you can ship today.</p>
-      </header>
-      <ol class="progress-hint" aria-label="Upload progress">
+    <section class="intake" aria-label="Upload flow">
+      <ol class="stepper">
         <li class="${hasFiles ? 'complete' : 'active'}">Upload</li>
-        <li class="${state.isAnalyzing ? 'active' : hasFiles ? '' : ''}">Analyze</li>
+        <li class="${state.isAnalyzing ? 'active' : state.analysis ? 'complete' : ''}">Analyze</li>
         <li class="${state.analysis ? 'complete' : ''}">Fixes</li>
       </ol>
-      <div class="intake-card drop-zone" data-role="dropzone">
-        <div class="drop-inner">
-          <button type="button" class="secondary-button" data-action="trigger-upload">Drop or select screenshots</button>
-          <p class="drop-hint">PNG, JPG, or PDF. Up to 6 files.</p>
-          <input type="file" accept="image/*,.pdf" multiple hidden data-role="file-input">
-          <div class="file-preview" id="file-preview">${renderFileList()}</div>
-        </div>
+      <div class="ellipse-shell drop-zone" data-role="dropzone">
+        <button type="button" class="ghost-button" data-action="trigger-upload">Drop or select screenshots</button>
+        <input type="file" accept="image/*,.pdf" multiple hidden data-role="file-input">
+        <div class="placeholder">PNG, JPG, PDF · up to 6 files</div>
+        <div class="file-preview" id="file-preview">${renderFilePreview()}</div>
       </div>
       <div class="intake-actions">
         <button type="button" class="example-chip" data-action="open-example">See an example</button>
-        <button type="button" id="analyze-btn" class="primary-button" ${hasFiles && !state.isAnalyzing ? '' : 'disabled'}>${state.isAnalyzing ? 'Analyzing…' : 'Analyze'}</button>
+        <button type="button" class="primary-button" id="analyze-btn" ${hasFiles && !state.isAnalyzing ? '' : 'disabled'}>${state.isAnalyzing ? 'Analyzing…' : 'Analyze'}</button>
       </div>
       <p class="privacy-note">Screenshots analyzed once, not stored. Local OCR by default; AI analysis only if you opt in.</p>
     </section>
   `;
 }
 
-function analysisSectionMarkup(analysis) {
-  const { scores, flags, freeRewrite, freeCss, lockedInsights, builderActions, experiments, checklist } = analysis;
+function analysisMarkup(data) {
+  const { scores, flags, freeRewrite, lockedInsights, builderActions, experiments, checklist } = data;
   return `
     <section class="analysis" aria-live="polite">
       <div class="scorecard">
-        ${renderScore('Confidence', scores.confidence)}
-        ${renderScore('Pushiness', scores.pushiness)}
-        ${renderScore('Clarity', scores.clarity)}
+        ${renderScore('Confidence', scores?.confidence)}
+        ${renderScore('Pushiness', scores?.pushiness)}
+        ${renderScore('Clarity', scores?.clarity)}
       </div>
       <div class="flags">
         <h2>Top risks</h2>
         <div class="flag-grid">
-          ${flags.map(renderFlagCard).join('')}
+          ${Array.isArray(flags) && flags.length ? flags.map(renderFlag).join('') : '<p class="empty">No major risks detected.</p>'}
         </div>
       </div>
       <div class="free-fixes">
-        ${renderRewriteCard(freeRewrite)}
-        ${renderCssCard(freeCss)}
+        ${renderRewrite(freeRewrite)}
       </div>
-      ${lockedInsights && lockedInsights.length ? lockedBlockMarkup(lockedInsights) : ''}
+      ${lockedInsights && lockedInsights.length ? lockedOverlay(lockedInsights) : ''}
       ${renderExtras(builderActions, experiments, checklist)}
     </section>
   `;
 }
 
-function lockedBlockMarkup(lockedInsights) {
-  return `
-    <div class="locked-block">
-      <div class="locked-overlay"></div>
-      <div class="locked-content">
-        <h3>Unlock the full build plan</h3>
-        <ul>${lockedInsights
-          .map((item) => `<li><strong>${item.title}</strong><span>${item.summary}</span></li>`)
-          .join('')}</ul>
-        <button type="button" class="primary-button locked-cta" disabled>Generate full build plan ($7/mo)</button>
-      </div>
-    </div>
-  `;
-}
-
 function renderScore(label, value) {
-  const pct = clampScore(value);
+  const pct = clampScore(value ?? 50);
   return `
-    <div class="score">
-      <div class="score-label">${label}</div>
-      <div class="score-value">${pct}</div>
+    <article class="score">
+      <header>
+        <span class="score-label">${label}</span>
+        <span class="score-value">${pct}</span>
+      </header>
       <div class="score-bar"><span style="width:${pct}%"></span></div>
-    </div>
-  `;
-}
-
-function renderFlagCard(flag) {
-  return `
-    <article class="flag-card">
-      <h3>${flag.title}</h3>
-      <p>${flag.detail}</p>
-      <footer>${flag.evidence}</footer>
     </article>
   `;
 }
 
-function renderRewriteCard(rewrite) {
+function renderFlag(flag) {
+  return `
+    <article class="flag-card">
+      <h3>${flag.title || 'Issue'}</h3>
+      <p>${flag.detail || 'Needs clarification.'}</p>
+      <footer>${flag.evidence || 'No evidence provided.'}</footer>
+    </article>
+  `;
+}
+
+function renderRewrite(rewrite = {}) {
   return `
     <article class="fix-card">
-      <header>Free rewrite</header>
-      <div class="rewrite-block">
+      <h3>Free rewrite</h3>
+      <div class="rewrite-grid">
         <div>
-          <span class="fix-label">Before</span>
-          <p>${rewrite.before}</p>
+          <span class="chip">Before</span>
+          <p>${rewrite.before || 'Original copy unavailable.'}</p>
         </div>
         <div>
-          <span class="fix-label">After</span>
-          <p>${rewrite.after}</p>
+          <span class="chip">After</span>
+          <p>${rewrite.after || 'Rewrite unavailable.'}</p>
         </div>
       </div>
       ${rewrite.rationale ? `<p class="rationale">${rewrite.rationale}</p>` : ''}
@@ -133,30 +124,30 @@ function renderRewriteCard(rewrite) {
   `;
 }
 
-function renderCssCard(css) {
+function lockedOverlay(locked = []) {
   return `
-    <article class="fix-card">
-      <header>Free CSS tweak</header>
-      <div class="css-block">
-        <code>${css.selector}</code>
-        <pre>${css.change}</pre>
+    <aside class="locked-block">
+      <div class="locked-overlay"></div>
+      <div class="locked-content">
+        <h3>Unlock the full build plan</h3>
+        <ul>${locked.map((item) => `<li><strong>${item.title}</strong><span>${item.summary}</span></li>`).join('')}</ul>
+        <button type="button" class="primary-button" disabled>Generate full build plan ($7/mo)</button>
       </div>
-      ${css.rationale ? `<p class="rationale">${css.rationale}</p>` : ''}
-    </article>
+    </aside>
   `;
 }
 
-function renderExtras(builderActions, experiments, checklist) {
+function renderExtras(actions = [], experiments = [], checklist = []) {
   const sections = [];
-  if (builderActions && builderActions.length) {
+  if (actions.length) {
     sections.push(`
       <section class="extras">
         <h3>Builder pointers</h3>
-        <ul>${builderActions.map((item) => `<li><strong>${item.title}</strong><span>${item.detail}</span></li>`).join('')}</ul>
+        <ul>${actions.map((item) => `<li><strong>${item.title}</strong><span>${item.detail}</span></li>`).join('')}</ul>
       </section>
     `);
   }
-  if (experiments && experiments.length) {
+  if (experiments.length) {
     sections.push(`
       <section class="extras">
         <h3>Experiments</h3>
@@ -164,7 +155,7 @@ function renderExtras(builderActions, experiments, checklist) {
       </section>
     `);
   }
-  if (checklist && checklist.length) {
+  if (checklist.length) {
     sections.push(`
       <section class="extras">
         <h3>Checklist</h3>
@@ -175,15 +166,13 @@ function renderExtras(builderActions, experiments, checklist) {
   return sections.join('');
 }
 
-function renderFileList() {
-  if (state.files.length === 0) {
-    return '<p class="empty">No files yet.</p>';
-  }
+function renderFilePreview() {
+  if (!state.files.length) return '<p class="empty">No files yet.</p>';
   return state.files
     .map(
       (file, index) => `
         <div class="file-item">
-          <strong>${file.name}</strong>
+          <span>${file.name}</span>
           <span>${formatFileSize(file.size)}</span>
           <button type="button" data-action="remove-file" data-index="${index}">Remove</button>
         </div>
@@ -195,8 +184,8 @@ function renderFileList() {
 function exampleModalMarkup() {
   return `
     <div class="modal-backdrop" data-action="close-example">
-      <div class="modal" role="dialog" aria-modal="true" aria-label="Example report" data-role="modal">
-        <button type="button" class="modal-close" data-action="close-example">×</button>
+      <div class="modal" role="dialog" aria-modal="true">
+        <button type="button" class="modal-close" data-action="close-example" aria-label="Close">×</button>
         <h2>Sample scorecard preview</h2>
         <img src="/example-report.png" alt="Sample AI Trust report" />
       </div>
@@ -204,61 +193,55 @@ function exampleModalMarkup() {
   `;
 }
 
-function bindUploadControls() {
-  const dropzone = root.querySelector('.drop-zone');
+function bindIntakeEvents() {
+  const dropzone = root.querySelector('[data-role="dropzone"]');
   const fileInput = root.querySelector('[data-role="file-input"]');
-  const triggerBtn = root.querySelector('[data-action="trigger-upload"]');
-  const preview = root.querySelector('#file-preview');
+  const analyzeBtn = root.querySelector('#analyze-btn');
 
-  if (!dropzone || !fileInput) return;
-
-  triggerBtn?.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', (event) => {
-    handleFiles(event.target.files);
-    renderApp();
-  });
-
-  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((eventName) => {
-    dropzone.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      event.stopPropagation();
+  if (fileInput) {
+    fileInput.addEventListener('change', (event) => {
+      handleFiles(event.target.files);
+      render();
     });
-  });
+  }
 
-  ['dragenter', 'dragover'].forEach((eventName) => {
-    dropzone.addEventListener(eventName, () => dropzone.classList.add('dragover'));
-  });
+  if (dropzone) {
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((eventName) => {
+      dropzone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+    });
+    ['dragenter', 'dragover'].forEach((eventName) => {
+      dropzone.addEventListener(eventName, () => dropzone.classList.add('dragover'));
+    });
+    ['dragleave', 'drop'].forEach((eventName) => {
+      dropzone.addEventListener(eventName, () => dropzone.classList.remove('dragover'));
+    });
+    dropzone.addEventListener('drop', (event) => {
+      handleFiles(event.dataTransfer.files);
+      render();
+    });
+    const triggerUpload = dropzone.querySelector('[data-action="trigger-upload"]');
+    triggerUpload?.addEventListener('click', () => fileInput?.click());
+  }
 
-  ['dragleave', 'drop'].forEach((eventName) => {
-    dropzone.addEventListener(eventName, () => dropzone.classList.remove('dragover'));
-  });
-
-  dropzone.addEventListener('drop', (event) => {
-    handleFiles(event.dataTransfer.files);
-    renderApp();
-  });
-
-  preview?.querySelectorAll('[data-action="remove-file"]').forEach((button) => {
+  root.querySelectorAll('[data-action="remove-file"]').forEach((button) => {
     button.addEventListener('click', () => {
       const index = Number(button.dataset.index);
       state.files.splice(index, 1);
-      renderApp();
+      render();
     });
   });
+
+  analyzeBtn?.addEventListener('click', analyze);
 }
 
-function bindAnalyzeControls() {
-  const analyzeButton = root.querySelector('#analyze-btn');
-  if (analyzeButton) {
-    analyzeButton.addEventListener('click', handleAnalyzeClick);
-  }
-}
-
-function bindExampleControls() {
+function bindExampleEvents() {
   root.querySelectorAll('[data-action="open-example"]').forEach((button) => {
     button.addEventListener('click', () => {
       state.showExample = true;
-      renderApp();
+      render();
     });
   });
 
@@ -266,32 +249,33 @@ function bindExampleControls() {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
       state.showExample = false;
-      renderApp();
+      render();
     });
   });
 
-  const modalBackdrop = root.querySelector('.modal-backdrop');
-  if (modalBackdrop) {
-    modalBackdrop.addEventListener('click', (event) => {
-      if (event.target === modalBackdrop) {
+  const backdrop = root.querySelector('.modal-backdrop');
+  if (backdrop) {
+    backdrop.addEventListener('click', (event) => {
+      if (event.target === backdrop) {
         state.showExample = false;
-        renderApp();
+        render();
       }
     });
   }
 }
 
-async function handleAnalyzeClick() {
-  if (state.files.length === 0 || state.isAnalyzing) return;
+async function analyze() {
+  if (!state.files.length || state.isAnalyzing) return;
+
   state.isAnalyzing = true;
-  renderApp();
+  render();
 
   try {
     const formData = new FormData();
     state.files.forEach((file) => formData.append('files', file, file.name));
     formData.append('prompt', '');
-    formData.append('tone', 'low-tech');
-    formData.append('builder', 'No builder');
+    formData.append('tone', state.tone);
+    formData.append('builder', state.builder);
 
     const response = await fetch('/api/analyze', {
       method: 'POST',
@@ -303,21 +287,20 @@ async function handleAnalyzeClick() {
       throw new Error(body.error || 'Analysis failed.');
     }
 
-    const data = await response.json();
-    state.analysis = data;
+    state.analysis = await response.json();
     state.files = [];
   } catch (error) {
     console.error(error);
     alert(error.message || 'Analysis failed.');
   } finally {
     state.isAnalyzing = false;
-    renderApp();
+    render();
   }
 }
 
 function handleFiles(fileList) {
   const accepted = Array.from(fileList || []).slice(0, 6);
-  if (accepted.length === 0) return;
+  if (!accepted.length) return;
   state.files = accepted;
 }
 
