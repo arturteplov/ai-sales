@@ -147,9 +147,14 @@ function lockedOverlay(locked = [], isCheckingOut = false) {
             )
             .join('')}
         </ul>
-        <button type="button" class="primary-button" data-action="start-checkout">
-          ${isCheckingOut ? 'Redirecting…' : 'Generate full build plan ($7/mo)'}
-        </button>
+        <div class="locked-actions">
+          <button type="button" class="primary-button" data-action="start-checkout">
+            ${isCheckingOut ? 'Redirecting…' : 'Generate full build plan ($7/mo)'}
+          </button>
+          <button type="button" class="secondary-button" data-action="start-test-checkout">
+            Test pay (dev)
+          </button>
+        </div>
       </div>
     </aside>
   `;
@@ -287,6 +292,10 @@ function bindAnalysisEvents() {
   if (checkoutButton) {
     checkoutButton.addEventListener('click', startCheckout);
   }
+  const testCheckoutButton = root.querySelector('[data-action="start-test-checkout"]');
+  if (testCheckoutButton) {
+    testCheckoutButton.addEventListener('click', startTestCheckout);
+  }
 }
 
 async function analyze() {
@@ -374,5 +383,36 @@ async function startCheckout(event) {
     state.isCheckingOut = false;
     render();
     alert(error.message || 'Unable to start checkout.');
+  }
+}
+
+async function startTestCheckout(event) {
+  event.preventDefault();
+  if (state.isCheckingOut) return;
+
+  try {
+    state.isCheckingOut = true;
+    render();
+
+    const response = await fetch('/api/payments/test-checkout', {
+      method: 'POST'
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || 'Unable to simulate checkout.');
+    }
+
+    const data = await response.json();
+    if (data?.url) {
+      window.location.href = data.url;
+    } else {
+      throw new Error('Test checkout link unavailable.');
+    }
+  } catch (error) {
+    console.error(error);
+    state.isCheckingOut = false;
+    render();
+    alert(error.message || 'Unable to simulate checkout.');
   }
 }

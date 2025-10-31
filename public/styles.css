@@ -368,6 +368,13 @@ pre {
   color: var(--text-secondary);
 }
 
+.locked-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
 .locked-content .locked-list li {
   display: flex;
   align-items: flex-start;
@@ -391,6 +398,22 @@ pre {
 .locked-text p {
   margin: 0;
   line-height: 1.6;
+}
+
+.secondary-button {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  padding: 12px 22px;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.secondary-button:hover {
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 .extras {
