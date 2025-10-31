@@ -329,6 +329,14 @@ pre {
   gap: 16px;
 }
 
+.locked-content .primary-button {
+  align-self: flex-start;
+  padding: 12px 24px;
+  font-size: 15px;
+  min-height: 44px;
+  width: auto;
+}
+
 .locked-content ul {
   margin: 0;
   padding-left: 18px;

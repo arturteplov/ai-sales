@@ -1036,39 +1036,31 @@ function generateScorecardVariant({ tone, builder }) {
 function buildVariantFromSeed(seed, { tone, builder }) {
   const rng = mulberry32(seed * 9973 + 17);
   const scores = generateScores(rng);
-  const builderGuidance = getBuilderGuidance(builder);
-
-  const flags = pickFlags(scores, builderGuidance, rng);
-  const freeRewrite = pickRewrite(scores, builderGuidance, rng);
-  const lockedInsights = pickLockedInsights(builderGuidance, rng);
-  const builderActions = pickBuilderActions(builderGuidance, rng);
-  const experiments = pickFromList(EXPERIMENT_TEMPLATES, rng, 2);
-  const checklist = pickFromList(CHECKLIST_TEMPLATES, rng, 3);
+  const guidance = getBuilderGuidance(builder);
 
   return {
     builder,
     tone,
     scores,
-    flags,
-    freeRewrite,
-    lockedInsights,
-    builderActions,
-    experiments,
-    checklist,
+    flags: buildFlags(scores, guidance, rng),
+    freeRewrite: buildRewrite(scores, guidance, rng),
+    lockedInsights: buildLockedInsights(guidance, rng),
+    builderActions: buildBuilderPointers(guidance, rng),
+    experiments: buildExperiments(guidance, rng),
+    checklist: buildChecklist(guidance, rng),
     metadata: {}
   };
 }
 
 function generateScores(rng) {
-  const base = randomBetween(rng, 35, 80);
+  const base = randomBetween(rng, 35, 82);
   const confidence = clampScore(base + randomBetween(rng, -5, 5));
-  const pushiness = clampScore(confidence + randomBetween(rng, -5, 5));
+  const pushiness = clampScore(confidence + randomBetween(rng, -6, 6));
   const clarity = clampScore(Math.round((confidence + pushiness) / 2) + randomBetween(rng, -4, 4));
 
-  const scores = { confidence, pushiness, clarity };
-  const values = Object.values(scores);
-  const maxDiff = Math.max(...values) - Math.min(...values);
-  if (maxDiff > 10) {
+  const values = [confidence, pushiness, clarity];
+  const spread = Math.max(...values) - Math.min(...values);
+  if (spread > 10) {
     const average = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
     return {
       confidence: clampScore(average + randomBetween(rng, -4, 4)),
@@ -1077,61 +1069,77 @@ function generateScores(rng) {
     };
   }
 
-  return scores;
+  return { confidence, pushiness, clarity };
 }
 
-function pickFlags(scores, builderGuidance, rng) {
-  const candidates = FLAG_TEMPLATES.filter((template) => template.condition(scores));
-  const selected = [];
-
-  const pool = candidates.length ? candidates : FLAG_TEMPLATES;
-  const poolCopy = [...pool];
-  while (selected.length < 3 && poolCopy.length) {
-    const index = Math.floor(rng() * poolCopy.length);
-    selected.push(poolCopy.splice(index, 1)[0]);
-  }
-
-  return selected.map((template) => template.build(scores, builderGuidance));
+function buildFlags(scores, guidance, rng) {
+  const pools = FLAG_RULES.filter((rule) => rule.condition(scores))
+    .map((rule) => rule.variants)
+    .flat();
+  const pool = pools.length ? pools : FLAG_RULES.flatMap((rule) => rule.variants);
+  return pickDistinct(pool, rng, 3).map((variant) => ({
+    title: variant.title,
+    detail: substituteBuilder(variant.detail, guidance),
+    evidence: substituteBuilder(variant.evidence, guidance)
+  }));
 }
 
-function pickRewrite(scores, builderGuidance, rng) {
-  const candidates = REWRITE_TEMPLATES.filter((template) => template.condition(scores));
-  const template = (candidates.length ? candidates : REWRITE_TEMPLATES)[Math.floor(rng() * (candidates.length || REWRITE_TEMPLATES.length))];
-
+function buildRewrite(scores, guidance, rng) {
+  const pools = REWRITE_RULES.filter((rule) => rule.condition(scores))
+    .map((rule) => rule.variants)
+    .flat();
+  const pool = pools.length ? pools : REWRITE_RULES.flatMap((rule) => rule.variants);
+  const variant = randomFrom(pool, rng);
   return {
-    before: template.before(builderGuidance),
-    after: template.after(builderGuidance),
-    rationale: template.rationale
+    before: substituteBuilder(variant.before, guidance),
+    after: substituteBuilder(variant.after, guidance),
+    rationale: variant.rationale
   };
 }
 
-function pickLockedInsights(builderGuidance, rng) {
-  const entries = pickFromList(LOCKED_INSIGHT_TEMPLATES, rng, 3);
-  return entries.map((item) => ({
-    title: item.title(builderGuidance),
-    summary: item.summary(builderGuidance)
+function buildLockedInsights(guidance, rng) {
+  return pickDistinct(LOCKED_INSIGHTS, rng, 3).map((variant) => ({
+    title: substituteBuilder(variant.title, guidance),
+    summary: substituteBuilder(variant.summary, guidance)
   }));
 }
 
-function pickBuilderActions(builderGuidance, rng) {
-  const tips = Array.isArray(builderGuidance.tips) ? builderGuidance.tips : [];
-  if (!tips.length) return [];
-  const count = Math.min(2, tips.length);
-  const chosen = pickFromList(tips, rng, count);
-  return chosen.map((tip, idx) => ({
-    title: idx === 0 ? `Start in ${builderGuidance.label}` : 'Polish the experience',
-    detail: tip
-  }));
+function buildBuilderPointers(guidance, rng) {
+  return pickDistinct(BUILDER_POINTERS.map((variant) => variant(guidance)), rng, 2);
 }
 
-function pickFromList(list, rng, count) {
-  const copy = [...list];
+function buildExperiments(guidance, rng) {
+  return pickDistinct(EXPERIMENT_LIB, rng, 3).map((item) => substituteBuilder(item, guidance));
+}
+
+function buildChecklist(guidance, rng) {
+  return pickDistinct(CHECKLIST_LIB, rng, 3).map((item) => substituteBuilder(item, guidance));
+}
+
+function substituteBuilder(text, guidance) {
+  return text.replace(/{{builder}}/g, friendlyBuilderName(guidance));
+}
+
+function friendlyBuilderName(guidance) {
+  return guidance.label === 'No builder specified' ? 'your stack' : guidance.label;
+}
+
+function pickDistinct(pool, rng, count) {
+  const copy = [...pool];
   const result = [];
   while (result.length < count && copy.length) {
     const index = Math.floor(rng() * copy.length);
     result.push(copy.splice(index, 1)[0]);
   }
   return result;
+}
+
+function randomFrom(pool, rng) {
+  return pool[Math.floor(rng() * pool.length)];
+}
+
+function randomBetween(rng, min, max) {
+  return Math.round(rng() * (max - min) + min);
 }
 
 function mulberry32(a) {
@@ -1144,213 +1152,213 @@ function mulberry32(a) {
   };
 }
 
-function randomBetween(rng, min, max) {
-  return Math.round(rng() * (max - min) + min);
-}
-
-const FLAG_TEMPLATES = [
+const FLAG_RULES = [
   {
-    condition: (scores) => scores.confidence < 50,
-    build: (_scores, guidance) => ({
-      title: 'Confidence is shaky',
-      detail: 'The hero promise lacks proof or clarity so prospects hesitate to trust it.',
-      evidence: `Add logos or wins directly under the CTA in ${guidance.label}.`
-    })
+    condition: (scores) => scores.confidence < 55,
+    variants: [
+      { title: 'Trust feels thin', detail: 'Heroes promise the world but proof is missing.', evidence: 'Show one quantified win or a customer pull-quote above the CTA in {{builder}}.' },
+      { title: 'Proof gap early on', detail: 'Prospects do not see evidence until much later.', evidence: 'Add a logos strip or metric tile near the hero CTA in {{builder}}.' },
+      { title: 'Credibility undecided', detail: 'Nothing signals that teams like them already trust you.', evidence: 'Add a testimonial card adjacent to the hero in {{builder}}.' },
+      { title: 'Outcome sounds aspirational', detail: 'Promises are bold without showing you can deliver.', evidence: 'Include a quick before/after snippet near the hero in {{builder}}.' },
+      { title: 'Testimonials hidden', detail: 'Social proof lives too far down the flow to reassure the first impression.', evidence: 'Surface a customer quote or stat within the first viewport in {{builder}}.' },
+      { title: 'Metrics feel vague', detail: 'Numbers are phrased as “fast” or “huge” instead of hard data.', evidence: 'Show one specific result with timeframe and audience in {{builder}}.' },
+      { title: 'Risk reversal missing', detail: 'Buyers do not see guarantees or safety nets.', evidence: 'Add a short “Why it’s safe to try” block beside your CTA in {{builder}}.' },
+      { title: 'Outcome lacks evidence', detail: 'Bold claims appear without an example or visual proof.', evidence: 'Pair the headline with an annotated screenshot or data callout in {{builder}}.' },
+      { title: 'Signal mismatch', detail: 'Visual tone reads premium but copy feels unsubstantiated.', evidence: 'Anchor the hero with real customers, dates, or product milestones in {{builder}}.' },
+      { title: 'Trust marker buried', detail: 'Security or compliance badges are hidden in the footer.', evidence: 'Raise trust badges near forms or pricing tables in {{builder}}.' },
+      { title: 'Voice sounds hypey', detail: 'Superlatives sound like marketing rather than proof.', evidence: 'Swap in calm, specific language that references customer wins in {{builder}}.' },
+      { title: 'Advisor missing', detail: 'There’s no named persona or team behind the promise.', evidence: 'Introduce a short founder/coach note with credentials in {{builder}}.' },
+      { title: 'Proof cadence off', detail: 'You front-load features but leave proof for the end.', evidence: 'Interleave feature bullets with proof snippets throughout {{builder}}.' }
+    ]
   },
   {
-    condition: (scores) => scores.clarity < 48,
-    build: () => ({
-      title: 'Flow feels ambiguous',
-      detail: 'The first screen mixes multiple asks, creating analysis paralysis.',
-      evidence: 'Keep one primary CTA and place supporting links below the fold.'
-    })
+    condition: (scores) => scores.clarity < 52,
+    variants: [
+      { title: 'Flow feels ambiguous', detail: 'Multiple CTAs compete for attention.', evidence: 'Keep one bold CTA and demote others to text links in {{builder}}.' },
+      { title: 'Messaging overload', detail: 'Paragraphs bury the core benefit.', evidence: 'Rewrite the hero into a single sentence plus two bullet points in {{builder}}.' },
+      { title: 'Path is unclear', detail: 'Visitors cannot see what happens after clicking.', evidence: 'Add a “How it works” strip immediately under the hero CTA in {{builder}}.' },
+      { title: 'Hierarchy is flat', detail: 'Headlines, body, and buttons look the same.', evidence: 'Increase typographic contrast and spacing in {{builder}}.' },
+      { title: 'Screens feel crowded', detail: 'There is no breathing room between key ideas.', evidence: 'Introduce consistent padding blocks and simplify each row in {{builder}}.' },
+      { title: 'Story jumps around', detail: 'Visitors hop between benefits without a sequence.', evidence: 'Use a left-to-right or top-to-bottom narrative with one idea per section in {{builder}}.' },
+      { title: 'Jargon creeps in', detail: 'Industry terms appear before context is set.', evidence: 'Swap jargon for plain-language explanations in {{builder}}.' },
+      { title: 'Value not explicit', detail: 'Headlines hint at outcomes but never state them plainly.', evidence: 'Rewrite copy to spell out the before/after in {{builder}}.' },
+      { title: 'CTA labels vague', detail: 'Buttons say “Submit” or “Start” without context.', evidence: 'Rename CTAs so they describe the action that follows in {{builder}}.' },
+      { title: 'Screens lack focus', detail: 'Hero combines navigation, feature, and social proof at once.', evidence: 'Break content into focused blocks with single intent in {{builder}}.' },
+      { title: 'Sequence misses steps', detail: 'Users are asked to act before they see the workflow.', evidence: 'Add a three-step explainer or timeline ahead of the conversion CTA in {{builder}}.' },
+      { title: 'Visual weight uneven', detail: 'Important sections look similar to fine print.', evidence: 'Use contrast and typography to spotlight the core insight in {{builder}}.' },
+      { title: 'Copy repeats itself', detail: 'Benefits repeat without introducing new information.', evidence: 'Condense overlapping paragraphs into concise bullets in {{builder}}.' }
+    ]
   },
   {
     condition: (scores) => scores.pushiness > 60,
-    build: () => ({
-      title: 'Pushiness overtakes trust',
-      detail: 'Scarcity language and aggressive CTAs raise skepticism instead of urgency.',
-      evidence: 'Soften the tone and add a brief “what happens after” explanation.'
-    })
-  },
-  {
-    condition: (scores) => Math.min(scores.confidence, scores.clarity) >= 55 && scores.pushiness <= 55,
-    build: () => ({
-      title: 'Great tone, thin proof',
-      detail: 'The narrative is pleasant but lacks a reason to believe.',
-      evidence: 'Introduce one quantified outcome or testimonial within the first viewport.'
-    })
-  },
-  {
-    condition: (scores) => scores.confidence <= scores.pushiness && scores.confidence <= scores.clarity,
-    build: () => ({
-      title: 'Trust gap at the top',
-      detail: 'Visitors are unsure why your product wins versus alternatives.',
-      evidence: 'Add a comparison micro-table or credibility marker near the hero CTA.'
-    })
-  },
-  {
-    condition: (scores) => scores.clarity <= scores.confidence && scores.clarity <= scores.pushiness,
-    build: () => ({
-      title: 'Messaging overload',
-      detail: 'Multiple headlines and buttons compete for attention, diluting intent.',
-      evidence: 'Collapse secondary CTAs into subtle text links and keep one bold action.'
-    })
+    variants: [
+      { title: 'Urgency overwhelms trust', detail: 'Scarcity language appears before evidence.', evidence: 'Swap hype copy for a calm reassurance sentence near the CTA in {{builder}}.' },
+      { title: 'CTA feels aggressive', detail: 'Command-style language raises resistance.', evidence: 'Use outcome-driven CTA text like “See the AI Trust scorecard” in {{builder}}.' },
+      { title: 'Pressure precedes clarity', detail: 'Visitors feel pushed without understanding value.', evidence: 'Insert a “what you get” checklist before pricing in {{builder}}.' },
+      { title: 'Promo overload', detail: 'Stacked discounts make the page feel salesy.', evidence: 'Limit to one promotional cue and focus on value messaging in {{builder}}.' },
+      { title: 'Countdown fatigue', detail: 'Timers and urgency widgets clutter the hero.', evidence: 'Remove countdowns unless tied to a real event in {{builder}}.' },
+      { title: 'Pop-up pressure', detail: 'Entry pop-ups ask for commitment before context.', evidence: 'Delay modals until after proof and value are delivered in {{builder}}.' },
+      { title: 'Discount dominates', detail: 'The first message is about price, not outcome.', evidence: 'Lead with transformation, bring pricing later in {{builder}}.' },
+      { title: 'Scarcity without reason', detail: '“Only 5 left” language lacks evidence it is genuine.', evidence: 'Replace scarcity with clarity or explain the limit in {{builder}}.' },
+      { title: 'CTA stack tall', detail: 'Users see multiple bold CTAs in a single viewport.', evidence: 'Keep one primary CTA and demote the rest to links in {{builder}}.' },
+      { title: 'Caps lock commands', detail: 'All-caps CTAs feel like shouting.', evidence: 'Use sentence case CTA labels with a reassuring tone in {{builder}}.' },
+      { title: 'Hero reads like pitch', detail: 'Lead copy sounds like a sales script.', evidence: 'Rewrite in second person with clear outcomes instead of hype in {{builder}}.' },
+      { title: 'Pricing feels pushy', detail: 'Buy now messaging appears before benefit context.', evidence: 'Introduce pricing after explaining the journey and proof in {{builder}}.' },
+      { title: 'Risk acknowledged late', detail: 'Visitors see urgency before hearing about safeguards.', evidence: 'Add a short safety net or guarantee near the first CTA in {{builder}}.' }
+    ]
   },
   {
     condition: () => true,
-    build: () => ({
-      title: 'Visual hierarchy drifts',
-      detail: 'Spacing and contrast make it hard to scan the main outcome quickly.',
-      evidence: 'Increase vertical rhythm (24–32px gaps) and use one highlight color for CTAs.'
-    })
-  },
-  {
-    condition: (scores) => scores.pushiness < 45,
-    build: () => ({
-      title: 'CTA lacks urgency',
-      detail: 'A friendly tone is good but prospects need a reason to act now.',
-      evidence: 'Add a short line about what they gain in the first session or week.'
-    })
-  },
-  {
-    condition: (scores) => scores.confidence > 70,
-    build: () => ({
-      title: 'Great proof, missing next step',
-      detail: 'The offer feels credible, yet the path to value is still hidden.',
-      evidence: 'Include a simple “Step 1–2–3” ribbon directly beneath the fold.'
-    })
-  },
-  {
-    condition: (scores) => scores.pushiness >= 55 && scores.clarity >= 55,
-    build: () => ({
-      title: 'Tone balanced, polish layout',
-      detail: 'Copy is persuasive but visual rhythm makes scanning harder than it should be.',
-      evidence: 'Increase padding inside cards and ensure primary CTA has 3:1 contrast.'
-    })
+    variants: [
+      { title: 'Visual rhythm off', detail: 'Spacing inconsistencies make scanning harder.', evidence: 'Apply consistent 24px spacing blocks and align imagery with copy in {{builder}}.' },
+      { title: 'Navigation competes', detail: 'Top links pull focus from the main CTA.', evidence: 'Collapse low-priority nav items into a menu in {{builder}}.' },
+      { title: 'Support proof buried', detail: 'Important reassurance content sits below the fold.', evidence: 'Raise FAQs or security notes closer to the hero in {{builder}}.' },
+      { title: 'Empty states ignored', detail: 'Logged-in views feel unfinished and erode trust.', evidence: 'Design empty states with guidance and quick wins inside {{builder}}.' },
+      { title: 'Microcopy absent', detail: 'Forms lack helper text that eases friction.', evidence: 'Add short helper cues about time, requirements, or privacy in {{builder}}.' },
+      { title: 'Motion not utilized', detail: 'Static screens miss subtle motion that signals polish.', evidence: 'Introduce lightweight hover states or transitions for CTAs in {{builder}}.' },
+      { title: 'Information buried', detail: 'Critical onboarding details sit behind small links.', evidence: 'Promote onboarding overview into a card or stepper in {{builder}}.' },
+      { title: 'Support response unclear', detail: 'Support options hide behind generic links.', evidence: 'State response times or add “We reply within X hrs” near support entry in {{builder}}.' },
+      { title: 'Accessibility gaps', detail: 'Color contrast and focus states are inconsistent.', evidence: 'Audit contrast ratios and visible focus rings across {{builder}}.' },
+      { title: 'Mobile polish lagging', detail: 'Mobile layout stacks elements awkwardly.', evidence: 'Preview key pages on mobile and rebalance spacing in {{builder}}.' },
+      { title: 'Content lacks framing', detail: 'Sections begin abruptly without intro context.', evidence: 'Add short lead-in lines that frame why the section matters in {{builder}}.' },
+      { title: 'Imagery mismatched', detail: 'Visuals don’t reinforce the promise being made.', evidence: 'Swap stock imagery for product or customer context in {{builder}}.' },
+      { title: 'Settings feel tacked on', detail: 'Dashboard/secondary screens look like wireframes.', evidence: 'Bring dashboard styling in line with marketing polish inside {{builder}}.' }
+    ]
   }
 ];
 
-const REWRITE_TEMPLATES = [
+const REWRITE_RULES = [
   {
-    condition: (scores) => scores.confidence < 50,
-    before: () => 'Build your ideas faster with our platform.',
-    after: (guidance) => `Launch a ${guidance.label} demo that wins trust in under 48 hours.`,
-    rationale: 'Narrows the promise to an outcome and timeframe that feels believable.'
+    condition: (scores) => scores.confidence < 55,
+    variants: [
+      { before: 'Your team will love this product.', after: 'Teams shipping in {{builder}} use AI Trust so buyers believe the experience before launch.', rationale: 'Pairs social proof with outcome.' },
+      { before: 'Scale faster with us.', after: 'Let AI Trust reveal the exact screens eroding confidence, then patch them in {{builder}}.', rationale: 'Explains how the promise is delivered.' },
+      { before: 'We unlock growth instantly.', after: 'Upload a screen, get a confidence score, and ship the fix the same day.', rationale: 'Spells out the path to value.' },
+      { before: 'See why customers stay.', after: 'Show the exact moments AI Trust says build confidence, then reinforce them in {{builder}}.', rationale: 'Connects retention to specific moments.' },
+      { before: 'We are the trusted choice.', after: 'Share the AI Trust scorecard that proves where buyers lean in and why.', rationale: 'Turns “trust” into a measurable asset.' },
+      { before: 'Launch with certainty.', after: 'Run your flow through AI Trust and deliver every fix directly into {{builder}}.', rationale: 'Highlights the inspect → fix pipeline.' },
+      { before: 'A better way to convert.', after: 'AI Trust spots the friction, your team patches it, and prospects feel ready to buy.', rationale: 'Clarifies the partnership dynamic.' },
+      { before: 'Everything you need in one place.', after: 'Upload, score, and ship trust boosters without waiting on a full research cycle.', rationale: 'Reassures impatient teams.' }
+    ]
   },
   {
-    condition: (scores) => scores.clarity < 50,
-    before: () => 'We do everything you need for growth.',
-    after: (guidance) => `Give visitors a clear next step: preview, personalize, and publish in ${guidance.label}.`,
-    rationale: 'Clarifies the journey and makes the CTA more explicit.'
+    condition: (scores) => scores.clarity < 52,
+    variants: [
+      { before: 'One platform for everything.', after: 'AI Trust scores confidence, rewrites copy, and hands you CSS-ready tweaks.', rationale: 'Clarifies the workflow.' },
+      { before: 'The easiest way to build trust.', after: 'See what reassures or scares buyers, then export fixes tailored to {{builder}}.', rationale: 'Connects the promise to the builder.' },
+      { before: 'Improve UX with AI right now.', after: 'Upload, review the AI Trust scorecard, and copy the top fix into {{builder}}.', rationale: 'Gives a simple three-step process.' },
+      { before: 'We simplify everything.', after: 'Explain what buyers feel, what to fix, and how to ship it inside {{builder}}—all in one pass.', rationale: 'Removes vague “simplify” language.' },
+      { before: 'The best way to understand users.', after: 'AI Trust translates screenshots into a ranked list of clarity gaps to close.', rationale: 'Sets expectations about insight output.' },
+      { before: 'Designed for product teams.', after: 'Product squads drop their latest screens in and get line-by-line fixes back.', rationale: 'Clarifies who it is for and what they receive.' },
+      { before: 'Move faster with AI.', after: 'Use the scorecard to decide what to fix, then paste the rewrite and CSS tweak into {{builder}}.', rationale: 'Shows the entire motion.' },
+      { before: 'Clarity without the guesswork.', after: 'Every scan highlights what confuses buyers and how to rewrite it in minutes.', rationale: 'Reinforces the clarity angle.' }
+    ]
   },
   {
     condition: () => true,
-    before: () => 'Join thousands of happy users today!',
-    after: (guidance) => `Trusted by teams shipping in ${guidance.label}: see if your flow builds confidence in minutes.`,
-    rationale: 'Adds proof language and specifies what happens after clicking.'
+    variants: [
+      { before: 'Get started now.', after: 'Generate your AI Trust scorecard and copy the change buyers will feel immediately.', rationale: 'Describes the immediate payoff.' },
+      { before: 'Join thousands of happy users.', after: 'Join teams that patch trust gaps before prospects ever feel them.', rationale: 'Adds context to social proof.' },
+      { before: 'See the future of product building.', after: 'Know exactly where your flow loses confidence and fix it before launch.', rationale: 'Grounds futuristic language in outcome.' },
+      { before: 'Ready when you are.', after: 'Whenever you need a gut-check, upload your latest flow and see how confident it feels.', rationale: 'Keeps tone approachable.' },
+      { before: 'Ship with certainty.', after: 'Use the scorecard to align stakeholders on the next fix and why it matters.', rationale: 'Highlights stakeholder alignment.' },
+      { before: 'Everything tuned for trust.', after: 'From copy to CSS, AI Trust points where to polish so buyers lean in.', rationale: 'Summarises overall value.' },
+      { before: 'Confidence, on demand.', after: 'Drop your flow in, pull out focused fixes, and launch knowing what buyers will feel.', rationale: 'Highlights repeatable loops.' },
+      { before: 'Make it feel right.', after: 'AI Trust catches the subtle friction so customers experience momentum, not doubt.', rationale: 'Touches on emotional payoff.' }
+    ]
   }
 ];
 
-const LOCKED_INSIGHT_TEMPLATES = [
-  {
-    title: (guidance) => 'Full pricing teardown',
-    summary: (guidance) => `Shows where ${guidance.label} page loses trust and how to restructure tiers.`
-  },
-  {
-    title: () => 'Trust signal roadmap',
-    summary: () => 'Lists credibility anchors (logos, metrics, objections) to add by section.'
-  },
-  {
-    title: () => 'Conversion experiment kit',
-    summary: () => 'Outlines three experiments with metrics, setup, and sample copy.'
-  },
-  {
-    title: () => 'Hero visual recommendations',
-    summary: () => 'Suggests layouts and imagery to boost first-glance comprehension.'
-  },
-  {
-    title: () => 'Friction heatmap',
-    summary: () => 'Highlights the most confusing UI elements and how to stage them.'
-  }
+const LOCKED_INSIGHTS = [
+  { title: 'Pricing psychology teardown', summary: 'Highlights where prospects stall inside pricing and how to rebuild hierarchy.' },
+  { title: 'Trust signal roadmap', summary: 'Lists credibility anchors (logos, quotes, guarantees) to add by section.' },
+  { title: 'Conversion experiment kit', summary: 'Outlines three experiments with metrics, setup, and sample copy.' },
+  { title: 'Messaging objection matrix', summary: 'Maps top objections to copy patterns that neutralise them.' },
+  { title: 'Guided walkthrough critique', summary: 'Captures each step and marks where confusion spikes.' },
+  { title: 'Activation rescue plan', summary: 'Details improvements for onboarding and empty states to keep momentum.' },
+  { title: 'Hero heroics blueprint', summary: 'Breaks down headline, subhead, and CTA variants tested to lift first-click confidence.' },
+  { title: 'Proof sequencing playbook', summary: 'Shows the order to introduce logos, metrics, and stories without overwhelming the flow.' },
+  { title: 'Red flag detox', summary: 'Pinpoints anxiety-inducing phrases and proposes calmer replacements for each.' },
+  { title: 'Retention cues audit', summary: 'Surface moments where long-term value is implied but not stated, with fixes.' },
+  { title: 'International polish pack', summary: 'Flags localisation gaps and phrasing that may confuse non-native speakers.' },
+  { title: 'Mobile-first tune-up', summary: 'Focuses on thumb zones, tap targets, and viewport-specific trust cues.' },
+  { title: 'Nurture follow-up planner', summary: 'Outlines post-analysis email and in-product nudges to reinforce new messaging.' },
+  { title: 'Experiment prioritisation board', summary: 'Ranks test ideas by confidence, impact, and effort with next-step owners.' },
+  { title: 'Onboarding friction lens', summary: 'Finds the moments new users hesitate and offers microcopy to keep them moving.' },
+  { title: 'Churn prevention kit', summary: 'Connects in-product trust cues to retention campaigns with messaging examples.' }
 ];
 
-const EXPERIMENT_TEMPLATES = [
-  'A/B test the hero CTA label with a promise-oriented variant.',
+const BUILDER_AREAS = ['hero section', 'pricing grid', 'primary navigation', 'onboarding flow', 'dashboard layout', 'checkout form', 'feature comparison', 'testimonial row', 'empty states', 'mobile viewport'];
+const BUILDER_VERBS = ['Tighten', 'Rework', 'Polish', 'Clarify', 'Re-sequence', 'Elevate'];
+const BUILDER_DIRECTIVES = [
+  'realign spacing tokens and remove duplicate CTAs',
+  'add a proof row followed by a single decisive CTA',
+  'introduce a short “How it works” ribbon to set expectations',
+  'swap static imagery for product-in-action shots to ground the promise',
+  'boost CTA contrast and microinteraction feedback',
+  'break complex messaging into a headline plus two benefit bullets',
+  'place inline reassurance about privacy or effort near forms',
+  'layer customer quotes beside the primary action',
+  'check mobile padding so touch targets stay at least 44px tall',
+  'surface progress milestones to keep users confident'
+];
+
+const BUILDER_POINTERS = [];
+for (const area of BUILDER_AREAS) {
+  for (const verb of BUILDER_VERBS) {
+    for (const directive of BUILDER_DIRECTIVES) {
+      BUILDER_POINTERS.push((guidance) => ({
+        title: `${verb} the ${area}`,
+        detail: `In ${friendlyBuilderName(guidance)}, ${verb.toLowerCase()} the ${area} by ${directive}.`
+      }));
+    }
+  }
+}
+
+const EXPERIMENT_LIB = [
+  'Measure click-through after adding proof badges near the CTA in {{builder}}.',
   'Run a five-user interview to hear how they describe the offer back to you.',
-  'Measure click-through after adding proof badges near the CTA.',
-  'Try a two-step form to capture intent before asking for detailed info.'
+  'A/B test a “What happens next” strip versus the current hero layout in {{builder}}.',
+  'Track signup conversion after softening urgency copy to reassurance messaging.',
+  'Add a secondary CTA that offers a low-friction tour and measure adoption.',
+  'Enable session recording for the pricing page to observe hesitation points.',
+  'Test an inline progress bar during signup and monitor completion rates.',
+  'Swap the hero image for a product screencap and compare dwell time.',
+  'Add a post-CTA reassurance tooltip and measure reduction in drop-off.',
+  'Use exit-intent surveys to capture why visitors hesitate.',
+  'Pilot a “Why teams choose us” carousel and track interaction depth.',
+  'Set up a progressive disclosure test for pricing FAQs versus current layout.',
+  'Prototype a lighter trial tier and measure completion of onboarding in {{builder}}.',
+  'Invite power users to annotate uncertainty moments and compare against the scorecard.',
+  'Introduce live chat on the pricing page for a week and log the top three questions.',
+  'Send a follow-up survey after the new rewrite ships to gauge confidence shifts.',
+  'Swap urgency copy for social proof in the hero and compare primary CTA clicks.',
+  'Record moderated sessions where users narrate trust breakers across the flow.',
+  'Bundle the CSS tweak into a launch note and monitor retention cohorts.'
 ];
 
-const CHECKLIST_TEMPLATES = [
-  'Confirm hero CTA maintains 3:1 contrast against its background.',
-  'Ensure mobile spacing keeps sections scannable (min 24px blocks).',
+const CHECKLIST_LIB = [
+  'Confirm hero CTA maintains ≥3:1 contrast against its background.',
   'Add alt text to hero imagery to reinforce the promise.',
-  'Capitalize only the first word of headlines for readability.',
-  'Place a short reassurance line near any pricing or signup ask.'
+  'Place a short reassurance line near any pricing or signup ask.',
+  'Ensure testimonials show full names, roles, and company logos.',
+  'Run copy through a plain-language pass to remove jargon.',
+  'Verify mobile spacing keeps sections scannable (min 24px blocks).',
+  'Add context to form labels (e.g., “Team size — 5, 25, 100”).',
+  'Check that error states explain how to recover.',
+  'Provide a secondary “See how it works” path for skimmers.',
+  'Confirm key screens load in under three seconds on mobile.',
+  'Review navigation so only high-intent links remain in the hero.',
+  'Add a short onboarding checklist for new users to build momentum.',
+  'Audit keyboard navigation to ensure focus order follows visual hierarchy.',
+  'Include a privacy or security assurance sentence near any data capture.',
+  'Cross-check responsive typography to prevent oversized headings on mobile.',
+  'Make sure pricing tables highlight the recommended plan with subtle contrast.',
+  'Label uploaded screenshots with descriptive alt text when reused in marketing.',
+  'Double-check that all CTAs describe the outcome (“View report”, not “Submit”).',
+  'Ensure modals provide escape routes and do not trap focus.',
+  'Note which sections lack supporting visuals and plan one contextual image each.'
 ];
-
-function clampScore(value) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return 50;
-  if (num < 0) return 0;
-  if (num > 100) return 100;
-  return Math.round(num);
-}
-
-function fallbackScorecard({ tone, builder }) {
-  const guidance = getBuilderGuidance(builder);
-  const tipList = Array.isArray(guidance.tips) ? guidance.tips : [];
-
-  return {
-    builder,
-    tone,
-    scores: { confidence: 55, pushiness: 45, clarity: 60 },
-    flags: [
-      {
-        title: 'Unclear promise',
-        detail: 'Hero copy mixes multiple outcomes, making it unclear what happens next.',
-        evidence: 'Headline and subheadline should focus on a single transformation and CTA.'
-      },
-      {
-        title: 'Missing proof',
-        detail: 'Trust anchors are buried, forcing visitors to guess whether you deliver.',
-        evidence: 'Add quantified outcomes or testimonial snippets above the fold.'
-      },
-      {
-        title: 'CTA uncertainty',
-        detail: 'Button text does not explain what happens after clicking.',
-        evidence: 'Clarify the next step (e.g., “Start a 7-day guided trial”).'
-      }
-    ],
-    freeRewrite: {
-      before: 'All-in-one platform that does everything for everyone.',
-      after: `Launch high-converting demos in ${guidance.label} tailored to your buyers in under 48 hours.`,
-      rationale: 'Sharpen the promise to a specific audience and timeframe.'
-    },
-    lockedInsights: [
-      {
-        title: 'Pricing page teardown',
-        summary: 'Breaks down the friction points across tiers and proposes a simplified layout.'
-      },
-      {
-        title: 'Trust signal roadmap',
-        summary: 'Recommends proof anchors, testimonial placement, and social validation steps.'
-      },
-      {
-        title: 'Conversion experiment kit',
-        summary: 'Outlines three experiments with metrics, setup, and sample copy.'
-      }
-    ],
-    builderActions: tipList.slice(0, 2).map((tip, idx) => ({
-      title: idx === 0 ? `Start in ${guidance.label}` : 'Polish with design tokens',
-      detail: tip
-    })),
-    experiments: ['Run a before/after usability test focusing on first-click success.'],
-    checklist: ['Verify mobile spacing in hero section.', 'Add success metrics near primary CTA.'],
-    metadata: {}
-  };
-}
 function handleStripeWebhook(event) {
   const { type, data } = event;
   const object = data?.object || {};
