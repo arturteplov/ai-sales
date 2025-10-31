@@ -210,7 +210,8 @@ function exampleModalMarkup() {
       <div class="modal" role="dialog" aria-modal="true">
         <button type="button" class="modal-close" data-action="close-example" aria-label="Close">×</button>
         <h2>Sample scorecard preview</h2>
-        <img src="/example-report.png" alt="Sample AI Trust report" />
+        <iframe src="/api/reports/example" title="Example AI Trust report" loading="lazy"></iframe>
+        <a class="example-download" href="/api/reports/example" target="_blank" rel="noopener">Open example in new tab</a>
       </div>
     </div>
   `;

@@ -12,6 +12,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const UPLOAD_DIR = path.resolve(__dirname, '..', 'tmp_uploads');
+const REPORT_LIBRARY_DIR = path.resolve(__dirname, '..', 'reports');
 const SESSION_COOKIE = 'ai_sales_session';
 const FREE_BUILD_LIMIT = Number(process.env.FREE_BUILD_LIMIT || 1);
 const SESSION_STORE = new Map();
@@ -19,6 +20,9 @@ const SESSION_INDEX_BY_CUSTOMER = new Map();
 
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+if (!fs.existsSync(REPORT_LIBRARY_DIR)) {
+  fs.mkdirSync(REPORT_LIBRARY_DIR, { recursive: true });
 }
 
 const upload = multer({
@@ -108,6 +112,7 @@ app.post('/api/analyze', upload.array('files'), async (req, res) => {
       tone,
       payload: response
     });
+    session.lastConfidence = response.scores?.confidence ?? null;
     res.json(response);
   } catch (error) {
     console.error('Advisor error:', error);
@@ -285,6 +290,16 @@ app.get('/api/reports/download', (req, res) => {
   }
 
   try {
+    const confidenceScore = session.lastConfidence;
+    const libraryBuffer = pickLibraryReportForScore(confidenceScore);
+    if (libraryBuffer) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="ai-trust-confidence-report.pdf"');
+      res.setHeader('Content-Length', libraryBuffer.length);
+      res.send(libraryBuffer);
+      return;
+    }
+
     const builder = session.lastBuilder || 'No builder';
     const report = buildReportTemplate({ builder });
     const pdfBuffer = generateReportPdf(report);
@@ -316,6 +331,22 @@ app.get('/privacy', (_req, res) => {
 
 app.get('/terms', (_req, res) => {
   res.sendFile(path.join(publicDir, 'terms.html'));
+});
+
+app.get('/api/reports/example', (_req, res) => {
+  try {
+    const example = getExampleReport();
+    if (!example) {
+      return res.status(404).json({ error: 'not_found', message: 'No example report available.' });
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="ai-trust-example-report.pdf"');
+    res.setHeader('Content-Length', example.length);
+    res.send(example);
+  } catch (error) {
+    console.error('Example report error:', error);
+    res.status(500).json({ error: 'example_unavailable', message: 'Could not load example report.' });
+  }
 });
 
 app.use((_req, res) => {
@@ -1225,6 +1256,71 @@ function buildExperiments(guidance, rng) {
 
 function buildChecklist(guidance, rng) {
   return pickDistinct(CHECKLIST_LIB, rng, 3).map((item) => substituteBuilder(item, guidance));
+}
+
+function pickLibraryReportForScore(score) {
+  try {
+    const entries = fs.readdirSync(REPORT_LIBRARY_DIR, { withFileTypes: true });
+    const pdfs = entries.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.pdf'));
+    if (!pdfs.length) return null;
+
+    const ranges = { low: [], mid: [], high: [] };
+    pdfs.forEach((entry) => {
+      const match = entry.name.match(/(\d{2})\.pdf$/i);
+      if (!match) return;
+      const suffix = Number(match[1]);
+      if (suffix < 60) {
+        ranges.low.push(entry.name);
+      } else if (suffix < 90) {
+        ranges.mid.push(entry.name);
+      } else {
+        ranges.high.push(entry.name);
+      }
+    });
+
+    const bucket = selectBucket(score, ranges);
+    if (!bucket || !bucket.length) return null;
+    const choice = bucket[Math.floor(Math.random() * bucket.length)];
+    const filePath = path.join(REPORT_LIBRARY_DIR, choice);
+    return fs.readFileSync(filePath);
+  } catch (error) {
+    console.warn('Unable to read report library:', error.message);
+    return null;
+  }
+}
+
+function selectBucket(score, ranges) {
+  if (!Number.isFinite(score)) {
+    return ranges.mid.length ? ranges.mid : ranges.low.length ? ranges.low : ranges.high;
+  }
+  if (score < 60) {
+    return ranges.low.length ? ranges.low : fallbackBuckets(ranges, ['mid', 'high', 'low']);
+  }
+  if (score < 90) {
+    return ranges.mid.length ? ranges.mid : fallbackBuckets(ranges, ['high', 'low', 'mid']);
+  }
+  return ranges.high.length ? ranges.high : fallbackBuckets(ranges, ['mid', 'low', 'high']);
+}
+
+function fallbackBuckets(ranges, order) {
+  for (const key of order) {
+    if (ranges[key] && ranges[key].length) return ranges[key];
+  }
+  return null;
+}
+
+function getExampleReport() {
+  try {
+    const entries = fs.readdirSync(REPORT_LIBRARY_DIR, { withFileTypes: true });
+    const example = entries.find(
+      (entry) => entry.isFile() && entry.name.toLowerCase().startsWith('example_') && entry.name.toLowerCase().endsWith('.pdf')
+    );
+    if (!example) return null;
+    return fs.readFileSync(path.join(REPORT_LIBRARY_DIR, example.name));
+  } catch (error) {
+    console.warn('Unable to read example report:', error.message);
+    return null;
+  }
 }
 
 function buildReportTemplate({ builder }) {

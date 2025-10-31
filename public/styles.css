@@ -452,12 +452,26 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  position: relative;
 }
 
-.modal img {
+.modal iframe {
   width: 100%;
   border-radius: 16px;
   border: 1px solid var(--border);
+  min-height: 360px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.example-download {
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.example-download:hover {
+  color: var(--accent);
 }
 
 .modal-close {
