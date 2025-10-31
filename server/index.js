@@ -1091,13 +1091,17 @@ function buildSessionHistoryContext(history = []) {
   return lines.join('\n');
 }
 
-const SCORE_VARIANT_SEEDS = Array.from({ length: 100 }, (_, i) => i + 1);
-let scoreVariantCursor = 0;
-
 function generateScorecardVariant({ tone, builder }) {
-  const seed = SCORE_VARIANT_SEEDS[scoreVariantCursor];
-  scoreVariantCursor = (scoreVariantCursor + 1) % SCORE_VARIANT_SEEDS.length;
+  const seed = pickSeed();
   return buildVariantFromSeed(seed, { tone, builder });
+}
+
+function pickSeed() {
+  try {
+    return crypto.randomInt(1, 10_000_000);
+  } catch (_error) {
+    return Math.floor(Math.random() * 10_000_000) + 1;
+  }
 }
 
 function buildVariantFromSeed(seed, { tone, builder }) {
@@ -1115,7 +1119,7 @@ function buildVariantFromSeed(seed, { tone, builder }) {
     builderActions: buildBuilderPointers(guidance, rng),
     experiments: buildExperiments(guidance, rng),
     checklist: buildChecklist(guidance, rng),
-    metadata: {}
+    metadata: { seed }
   };
 }
 
