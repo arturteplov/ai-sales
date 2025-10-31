@@ -291,12 +291,15 @@ app.get('/api/reports/download', (req, res) => {
 
   try {
     const confidenceScore = session.lastConfidence;
-    const libraryBuffer = pickLibraryReportForScore(confidenceScore);
-    if (libraryBuffer) {
+    const libraryReport = pickLibraryReportForScore(confidenceScore);
+    if (libraryReport) {
+      const { buffer, filename } = libraryReport;
+      session.lastLibraryReport = filename;
+      console.log('[reports] Serving library report', { score: confidenceScore, filename });
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', 'attachment; filename="ai-trust-confidence-report.pdf"');
-      res.setHeader('Content-Length', libraryBuffer.length);
-      res.send(libraryBuffer);
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', buffer.length);
+      res.send(buffer);
       return;
     }
 
@@ -1266,23 +1269,17 @@ function pickLibraryReportForScore(score) {
 
     const ranges = { low: [], mid: [], high: [] };
     pdfs.forEach((entry) => {
-      const match = entry.name.match(/(\d{2})\.pdf$/i);
-      if (!match) return;
-      const suffix = Number(match[1]);
-      if (suffix < 60) {
-        ranges.low.push(entry.name);
-      } else if (suffix < 90) {
-        ranges.mid.push(entry.name);
-      } else {
-        ranges.high.push(entry.name);
-      }
+      const details = parseReportSuffix(entry.name);
+      if (!details) return;
+      const { suffix, category } = details;
+      ranges[category].push({ name: entry.name, suffix });
     });
 
     const bucket = selectBucket(score, ranges);
     if (!bucket || !bucket.length) return null;
     const choice = bucket[Math.floor(Math.random() * bucket.length)];
-    const filePath = path.join(REPORT_LIBRARY_DIR, choice);
-    return fs.readFileSync(filePath);
+    const filePath = path.join(REPORT_LIBRARY_DIR, choice.name);
+    return { buffer: fs.readFileSync(filePath), filename: choice.name };
   } catch (error) {
     console.warn('Unable to read report library:', error.message);
     return null;
@@ -1290,13 +1287,14 @@ function pickLibraryReportForScore(score) {
 }
 
 function selectBucket(score, ranges) {
-  if (!Number.isFinite(score)) {
+  const numericScore = typeof score === 'string' ? Number(score) : score;
+  if (!Number.isFinite(numericScore)) {
     return ranges.mid.length ? ranges.mid : ranges.low.length ? ranges.low : ranges.high;
   }
-  if (score < 60) {
+  if (numericScore < 60) {
     return ranges.low.length ? ranges.low : fallbackBuckets(ranges, ['mid', 'high', 'low']);
   }
-  if (score < 90) {
+  if (numericScore < 90) {
     return ranges.mid.length ? ranges.mid : fallbackBuckets(ranges, ['high', 'low', 'mid']);
   }
   return ranges.high.length ? ranges.high : fallbackBuckets(ranges, ['mid', 'low', 'high']);
@@ -1312,15 +1310,28 @@ function fallbackBuckets(ranges, order) {
 function getExampleReport() {
   try {
     const entries = fs.readdirSync(REPORT_LIBRARY_DIR, { withFileTypes: true });
-    const example = entries.find(
+    const exampleEntries = entries.filter(
       (entry) => entry.isFile() && entry.name.toLowerCase().startsWith('example_') && entry.name.toLowerCase().endsWith('.pdf')
     );
-    if (!example) return null;
-    return fs.readFileSync(path.join(REPORT_LIBRARY_DIR, example.name));
+    if (exampleEntries.length > 0) {
+      const choice = exampleEntries[Math.floor(Math.random() * exampleEntries.length)];
+      return fs.readFileSync(path.join(REPORT_LIBRARY_DIR, choice.name));
+    }
+    const fallback = pickLibraryReportForScore(75);
+    return fallback ? fallback.buffer : null;
   } catch (error) {
     console.warn('Unable to read example report:', error.message);
     return null;
   }
+}
+
+function parseReportSuffix(filename) {
+  const match = filename.match(/_(\d{2,3})\.pdf$/i);
+  if (!match) return null;
+  const suffix = Number(match[1]);
+  if (!Number.isFinite(suffix)) return null;
+  const category = suffix < 60 ? 'low' : suffix < 90 ? 'mid' : 'high';
+  return { suffix, category };
 }
 
 function buildReportTemplate({ builder }) {
