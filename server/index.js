@@ -96,6 +96,8 @@ app.post('/api/analyze', upload.array('files'), async (req, res) => {
     });
 
     const response = await callAdvisorModel({ tone, builder });
+    session.lastBuilder = builder;
+    session.lastTone = tone;
 
     cleanupFiles(files);
     appendSessionHistory(session, {
@@ -261,6 +263,34 @@ if (stripe && stripeWebhookSecret) {
     res.json({ received: true });
   });
 }
+
+app.get('/api/reports/download', (req, res) => {
+  const session = req.session || {};
+
+  if (!session.isSubscribed) {
+    return res.status(403).json({
+      error: 'forbidden',
+      message: 'An active subscription is required to download the full build plan.'
+    });
+  }
+
+  try {
+    const builder = session.lastBuilder || 'No builder';
+    const report = buildReportTemplate({ builder });
+    const pdfBuffer = generateReportPdf(report);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="ai-trust-build-plan.pdf"');
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('PDF generation error:', error);
+    res.status(500).json({
+      error: 'report_unavailable',
+      message: 'Could not generate the build plan PDF. Please try again shortly.'
+    });
+  }
+});
 
 app.get('/success', (_req, res) => {
   res.sendFile(path.join(publicDir, 'success.html'));
@@ -1187,6 +1217,178 @@ function buildChecklist(guidance, rng) {
   return pickDistinct(CHECKLIST_LIB, rng, 3).map((item) => substituteBuilder(item, guidance));
 }
 
+function buildReportTemplate({ builder }) {
+  const guidance = getBuilderGuidance(builder);
+  const label = friendlyBuilderName(guidance);
+  const seed = pickSeed();
+  const rng = mulberry32(seed * 6113 + 31);
+  const planHighlights = pickDistinct(REPORT_PLAN_POOL, rng, 5).map((item) => substituteBuilder(item, guidance));
+  const steps = pickDistinct(REPORT_STEP_POOL, rng, 10).map((item) => substituteBuilder(item, guidance));
+  const summary = [
+    substituteBuilder(randomFrom(REPORT_SUMMARY_LEADS, rng), guidance),
+    substituteBuilder(randomFrom(REPORT_SUMMARY_THEMES, rng), guidance),
+    substituteBuilder(randomFrom(REPORT_SUMMARY_FOLLOW_UP, rng), guidance)
+  ].join(' ');
+  const nextSteps = pickDistinct(REPORT_NEXT_STEPS, rng, 4).map((item) => substituteBuilder(item, guidance));
+
+  return {
+    builder,
+    builderLabel: label,
+    generatedAt: new Date().toISOString(),
+    planHighlights,
+    steps,
+    summary,
+    nextSteps,
+    seed
+  };
+}
+
+function generateReportPdf(report) {
+  const pages = buildReportPages(report);
+  const objects = [];
+
+  const addObject = (content = '') => {
+    const id = objects.length + 1;
+    objects.push({ id, content });
+    return id;
+  };
+
+  const setObject = (id, content) => {
+    objects[id - 1].content = content;
+  };
+
+  const catalogId = addObject();
+  const pagesId = addObject();
+  const fontId = addObject('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+
+  const pageEntries = pages.map((content) => {
+    const stream = buildContentStream(content);
+    const length = Buffer.byteLength(stream, 'utf8');
+    const streamId = addObject(`<< /Length ${length} >>\nstream\n${stream}\nendstream`);
+    const pageId = addObject();
+    return { pageId, streamId };
+  });
+
+  setObject(
+    pagesId,
+    `<< /Type /Pages /Kids [${pageEntries.map(({ pageId }) => `${pageId} 0 R`).join(' ')}] /Count ${pageEntries.length} >>`
+  );
+
+  pageEntries.forEach(({ pageId, streamId }) => {
+    setObject(
+      pageId,
+      `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${streamId} 0 R >>`
+    );
+  });
+
+  setObject(catalogId, `<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+
+  objects.forEach(({ id, content }) => {
+    const offset = Buffer.byteLength(pdf, 'utf8');
+    offsets[id] = offset;
+    pdf += `${id} 0 obj\n${content}\nendobj\n`;
+  });
+
+  const xrefOffset = Buffer.byteLength(pdf, 'utf8');
+  pdf += 'xref\n';
+  pdf += `0 ${objects.length + 1}\n`;
+  pdf += '0000000000 65535 f \n';
+  for (let i = 1; i <= objects.length; i += 1) {
+    const offset = offsets[i] ?? 0;
+    pdf += `${offset.toString().padStart(10, '0')} 00000 n \n`;
+  }
+  pdf += `trailer << /Size ${objects.length + 1} /Root ${catalogId} 0 R >>\n`;
+  pdf += `startxref\n${xrefOffset}\n%%EOF`;
+
+  return Buffer.from(pdf, 'utf8');
+}
+
+function buildContentStream(content) {
+  const lines = content.split('\n').map((line) => line.replace(/([\\()])/g, '\\$1'));
+  let stream = 'BT\n/F1 12 Tf\n14 TL\n72 720 Td\n';
+  lines.forEach((line, index) => {
+    if (index === 0) {
+      stream += `(${line}) Tj\n`;
+    } else {
+      stream += `T* (${line}) Tj\n`;
+    }
+  });
+  stream += 'ET';
+  return stream;
+}
+
+function buildReportPages(report) {
+  const date = new Date(report.generatedAt).toLocaleDateString();
+  const pages = [];
+
+  const pageOne = [
+    'AI Trust Build Plan',
+    `Generated for ${report.builderLabel} · ${date}`,
+    '',
+    'Plan Highlights',
+    ''
+  ];
+  report.planHighlights.forEach((item) => {
+    pageOne.push(...formatBullet(item));
+  });
+  pageOne.push('');
+  pageOne.push(`Variant seed: ${report.seed}`);
+  pages.push(pageOne.join('\n'));
+
+  const pageTwo = ['10-step Solution', ''];
+  report.steps.forEach((item, index) => {
+    pageTwo.push(...formatNumbered(index + 1, item));
+  });
+  pages.push(pageTwo.join('\n'));
+
+  const pageThree = ['Summary & Next Steps', ''];
+  wrapText(report.summary).forEach((line) => pageThree.push(line));
+  pageThree.push('');
+  pageThree.push('Recommended Next Steps');
+  pageThree.push('');
+  report.nextSteps.forEach((item) => {
+    pageThree.push(...formatBullet(item));
+  });
+  pageThree.push('');
+  pageThree.push('Need help implementing? Reply to this report and our team will jump in alongside your builders.');
+  pages.push(pageThree.join('\n'));
+
+  return pages;
+}
+
+function wrapText(text, width = 88) {
+  const words = String(text || '').split(/\s+/);
+  const lines = [];
+  let current = '';
+
+  words.forEach((word) => {
+    if (!word) return;
+    const tentative = current ? `${current} ${word}` : word;
+    if (tentative.length > width) {
+      if (current) lines.push(current);
+      current = word;
+    } else {
+      current = tentative;
+    }
+  });
+  if (current) lines.push(current);
+  return lines.length ? lines : [''];
+}
+
+function formatBullet(text) {
+  const wrapped = wrapText(text);
+  return wrapped.map((line, index) => (index === 0 ? `• ${line}` : `  ${line}`));
+}
+
+function formatNumbered(index, text) {
+  const prefix = `${index}.`;
+  const wrapped = wrapText(text);
+  return wrapped.map((line, idx) => (idx === 0 ? `${prefix} ${line}` : `   ${line}`));
+}
+
 function substituteBuilder(text, guidance) {
   return text.replace(/{{builder}}/g, friendlyBuilderName(guidance));
 }
@@ -1438,6 +1640,87 @@ const CHECKLIST_LIB = [
   'Ensure modals provide escape routes and do not trap focus.',
   'Note which sections lack supporting visuals and plan one contextual image each.'
 ];
+
+const REPORT_PLAN_POOL = [
+  'Tighten the hero promise so proof and outcome appear within the first viewport of {{builder}}.',
+  'Sequence logos, testimonial, and CTA to reinforce trust before pricing in {{builder}}.',
+  'Clarify navigation by trimming to the three highest-intent paths inside {{builder}}.',
+  'Introduce a “What happens next” strip so prospects know the journey.',
+  'Add privacy reassurance lines near every data capture point in {{builder}}.',
+  'Strengthen the pricing comparison with a recommended option and value bullets.',
+  'Surface a customer quote next to the primary CTA to dampen perceived risk.',
+  'Audit mobile spacing so touch targets stay ≥44px and content breathes.',
+  'Swap hype copy for benefit + proof statements across hero and onboarding screens.',
+  'Highlight activation milestones so new users see momentum instantly.',
+  'Bundle support, guarantees, and response times into a compact trust bar near CTAs.',
+  'Rewrite form microcopy to explain why each field is needed and how data is stored.',
+  'Add load-time instrumentation to keep critical screens under three seconds.',
+  'Design blank states with guidance and proof so users never hit a dead end.',
+  'Introduce a short product-in-action loop to visualise the promise inside {{builder}}.',
+  'Document an experiment backlog with owners, hypotheses, and next review date.',
+  'Run a friction sweep to remove duplicate CTAs and conflicting urgency cues.',
+  'Ship a live “See inside” tour to reduce uncertainty about signup.',
+  'Batch testimonial assets into modular cards to reuse across {{builder}}.',
+  'Create a Trust FAQ module answering data, pricing, and timeline questions.'
+];
+
+const REPORT_STEP_POOL = [
+  'Screenshot the current hero, annotate proof gaps, and rewrite the promise in plain language.',
+  'Replace the hero visual with a product-in-action asset that reinforces the outcome.',
+  'Add a customer logo strip or metric tile directly under the hero CTA in {{builder}}.',
+  'Rewrite the primary CTA to describe the next step (e.g., “View the trust plan”).',
+  'Introduce a secondary “See it working” path for visitors who need more context.',
+  'Consolidate navigation to the three highest-intent actions and move the rest to the footer.',
+  'Create a concise “How it works” strip that shows step 1–3 with supporting proof.',
+  'Add a guarantee or reassurance sentence beside each pricing CTA.',
+  'Reset spacing tokens (24px/32px) to restore rhythm across sections.',
+  'Adjust typography tokens so headings, body copy, and buttons feel distinct.',
+  'Instrument key CTAs with analytics to capture conversions and drop-offs.',
+  'Run a five-person user test focused on comprehension and trust signals.',
+  'Refresh onboarding emails to mirror the new promise and link to proof assets.',
+  'Design empty states that guide the next action using contextual copy and cues.',
+  'Implement a success metrics dashboard to monitor trust KPIs weekly.',
+  'Add progress indicators to any multi-step form or onboarding journey.',
+  'Record a Loom walkthrough to humanise the team and set the right tone.',
+  'Update testimonial content with quotes that address the top objections.',
+  'Create an experiment backlog with priority, hypothesis, and owner.',
+  'Publish a voice-and-tone guide so future copy stays proof-led.'
+];
+
+const REPORT_SUMMARY_LEADS = [
+  'We reviewed your latest build in {{builder}} through the lens of confidence, clarity, and pushiness.',
+  'AI Trust ran a full heuristic sweep across hero, proof, pricing, and onboarding flows in {{builder}}.',
+  'Your {{builder}} experience already signals value—our work locks in the trust story around it.',
+  'We mapped the buyer journey in {{builder}} to understand where trust wobbles versus where it lands.'
+];
+
+const REPORT_SUMMARY_THEMES = [
+  'Prospects currently hesitate because proof arrives late and navigation competes with the main CTA.',
+  'Spacing and microcopy drift add friction that makes the core promise feel risky.',
+  'Pricing and onboarding lack the guardrails that reassure buyers they are making the right move.',
+  'Trust markers exist but sit too far down the flow to affect the first impression.'
+];
+
+const REPORT_SUMMARY_FOLLOW_UP = [
+  'The plan prioritises quick wins, then layers structured experiments to reinforce results.',
+  'Roll out the steps over the next two sprints and track conversion + drop-off to validate impact.',
+  'After implementation, run short interviews and compare analytics to ensure confidence actually rises.',
+  'Use the experiment backlog to keep iterating once the foundation feels stronger and proof-led.'
+];
+
+const REPORT_NEXT_STEPS = [
+  'Schedule a 30-minute review to align stakeholders on the refreshed trust narrative.',
+  'Share the rewritten hero copy with design so assets update quickly inside {{builder}}.',
+  'Pair engineering and design to ship spacing and typography fixes in the next sprint.',
+  'Set up analytics dashboards tracking trust KPIs, conversion, and bounce weekly.',
+  'Line up three customer interviews to validate the revised story and capture new proof.',
+  'Plan an experiment cadence (one per week) using the backlog from this report.',
+  'Draft the onboarding checklist and publish it directly inside {{builder}}.',
+  'Loop support into the updated guarantee and FAQ so messaging stays consistent.',
+  'Review the pricing page with finance to ensure value framing matches the new copy.',
+  'Enable a success email triggered after the first key activation celebrating progress.'
+];
+
 function handleStripeWebhook(event) {
   const { type, data } = event;
   const object = data?.object || {};
