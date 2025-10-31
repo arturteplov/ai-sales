@@ -243,6 +243,16 @@ app.post('/api/payments/checkout', async (req, res) => {
   }
 });
 
+app.post('/api/payments/test-checkout', (req, res) => {
+  const session = req.session || {};
+  session.isSubscribed = true;
+  session.buildsUsed = 0;
+  session.stripeCustomerId = session.stripeCustomerId || `test_${crypto.randomUUID()}`;
+  session.updatedAt = Date.now();
+
+  res.json({ url: '/success?mode=test' });
+});
+
 if (stripe && stripeWebhookSecret) {
   app.post('/api/payments/webhook', (req, res) => {
     const signature = req.headers['stripe-signature'];
