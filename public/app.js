@@ -6,7 +6,8 @@ const state = {
   isAnalyzing: false,
   showExample: false,
   tone: 'low-tech', // preserved for future use
-  builder: 'No builder'
+  builder: 'No builder',
+  isCheckingOut: false
 };
 
 render();
@@ -23,6 +24,7 @@ function render() {
 
   bindIntakeEvents();
   bindExampleEvents();
+  bindAnalysisEvents();
 }
 
 function heroMarkup() {
@@ -76,7 +78,7 @@ function analysisMarkup(data) {
       <div class="free-fixes">
         ${renderRewrite(freeRewrite)}
       </div>
-      ${lockedInsights && lockedInsights.length ? lockedOverlay(lockedInsights) : ''}
+      ${lockedInsights && lockedInsights.length ? lockedOverlay(lockedInsights, state.isCheckingOut) : ''}
       ${renderExtras(builderActions, experiments, checklist)}
     </section>
   `;
@@ -124,14 +126,30 @@ function renderRewrite(rewrite = {}) {
   `;
 }
 
-function lockedOverlay(locked = []) {
+function lockedOverlay(locked = [], isCheckingOut = false) {
   return `
     <aside class="locked-block">
       <div class="locked-overlay"></div>
       <div class="locked-content">
         <h3>Unlock the full build plan</h3>
-        <ul>${locked.map((item) => `<li><strong>${item.title}</strong><span>${item.summary}</span></li>`).join('')}</ul>
-        <button type="button" class="primary-button" disabled>Generate full build plan ($7/mo)</button>
+        <ul class="locked-list">
+          ${locked
+            .map(
+              (item) => `
+                <li>
+                  <span class="locked-bullet">•</span>
+                  <div class="locked-text">
+                    <strong>${item.title}</strong>
+                    <p>${item.summary}</p>
+                  </div>
+                </li>
+              `
+            )
+            .join('')}
+        </ul>
+        <button type="button" class="primary-button" data-action="start-checkout">
+          ${isCheckingOut ? 'Redirecting…' : 'Generate full build plan ($7/mo)'}
+        </button>
       </div>
     </aside>
   `;
@@ -264,6 +282,13 @@ function bindExampleEvents() {
   }
 }
 
+function bindAnalysisEvents() {
+  const checkoutButton = root.querySelector('[data-action="start-checkout"]');
+  if (checkoutButton) {
+    checkoutButton.addEventListener('click', startCheckout);
+  }
+}
+
 async function analyze() {
   if (!state.files.length || state.isAnalyzing) return;
 
@@ -289,6 +314,7 @@ async function analyze() {
 
     state.analysis = await response.json();
     state.files = [];
+    state.isCheckingOut = false;
   } catch (error) {
     console.error(error);
     alert(error.message || 'Analysis failed.');
@@ -316,4 +342,37 @@ function clampScore(value) {
   if (num < 0) return 0;
   if (num > 100) return 100;
   return Math.round(num);
+}
+
+async function startCheckout(event) {
+  event.preventDefault();
+  if (state.isCheckingOut) return;
+
+  try {
+    state.isCheckingOut = true;
+    render();
+
+    const response = await fetch('/api/payments/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || 'Unable to start checkout.');
+    }
+
+    const data = await response.json();
+    if (data?.url) {
+      window.location.href = data.url;
+    } else {
+      throw new Error('Checkout link unavailable.');
+    }
+  } catch (error) {
+    console.error(error);
+    state.isCheckingOut = false;
+    render();
+    alert(error.message || 'Unable to start checkout.');
+  }
 }
